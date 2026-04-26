@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.CreatePolyphony;
@@ -94,8 +95,12 @@ public final class PolyphonyLinkManager {
             }
         }
 
+        // Ensure only the currently active held instrument carries the runtime link marker.
+        clearLinkedMarkersOnHands(player);
+
         PolyphonyLink link = LINKS.computeIfAbsent(newKey, k -> new PolyphonyLink(k.levelPath, pos));
         link.addOrRefreshPlayer(player, heldStack);
+        InstrumentLinkData.setLinked(heldStack, newKey);
         PLAYER_LINK.put(id, newKey);
 
         player.displayClientMessage(
@@ -128,10 +133,22 @@ public final class PolyphonyLinkManager {
             if (link.isEmpty()) LINKS.remove(key);
         }
         if (messageTarget != null) {
+            clearLinkedMarkersOnHands(messageTarget);
             messageTarget.displayClientMessage(
                 Component.translatable("message.createpolyphony.unlinked"), true);
         }
         return true;
+    }
+
+    /**
+     * Ensure currently linked players still hold their linked instrument in
+     * either hand. If they don't, unlink immediately.
+     */
+    public static void validateActiveLink(ServerPlayer player) {
+        LinkKey key = PLAYER_LINK.get(player.getUUID());
+        if (key == null) return;
+        if (holdsLinkedInstrument(player, key)) return;
+        unlink(player);
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -185,6 +202,14 @@ public final class PolyphonyLinkManager {
         ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
         if (target == null) return;
 
+        LinkKey key = LinkKey.of(level, pos);
+        if (!holdsLinkedInstrument(target, key)) {
+            // If the linked item left the player's hands between tick checks,
+            // stop routing immediately on the hot path too.
+            unlink(assignee, target);
+            return;
+        }
+
         // Sample lookup is keyed on GM program. By convention, channel 10 (index 9)
         // is always percussion regardless of any ProgramChange it received - we
         // map that to GM program 128 (Standard Drum Kit, 1-indexed) here so the
@@ -211,6 +236,19 @@ public final class PolyphonyLinkManager {
      */
     public static void onPlayerLogout(UUID id) {
         unlink(id, null);
+    }
+
+    private static boolean holdsLinkedInstrument(ServerPlayer player, LinkKey key) {
+        ItemStack main = player.getItemBySlot(EquipmentSlot.MAINHAND);
+        if (InstrumentItem.familyOf(main) != null && InstrumentLinkData.matches(main, key)) return true;
+
+        ItemStack off = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        return InstrumentItem.familyOf(off) != null && InstrumentLinkData.matches(off, key);
+    }
+
+    private static void clearLinkedMarkersOnHands(ServerPlayer player) {
+        InstrumentLinkData.clearLinked(player.getItemBySlot(EquipmentSlot.MAINHAND));
+        InstrumentLinkData.clearLinked(player.getItemBySlot(EquipmentSlot.OFFHAND));
     }
 
     /**
