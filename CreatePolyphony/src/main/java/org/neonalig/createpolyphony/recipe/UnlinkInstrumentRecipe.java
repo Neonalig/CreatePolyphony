@@ -12,7 +12,7 @@ import org.neonalig.createpolyphony.link.InstrumentLinkData;
 import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
 
 /**
- * One instrument in the crafting grid -> same instrument with link data removed.
+ * One linked instrument in the crafting grid -> same instrument with link data removed.
  */
 public final class UnlinkInstrumentRecipe extends CustomRecipe {
 
@@ -55,6 +55,9 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
                 return null;
             }
             if (!(stack.getItem() instanceof InstrumentItem)) {
+                return null;
+            }
+            if (!InstrumentLinkData.isLinked(stack)) {
                 return null;
             }
             found = stack;
