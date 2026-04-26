@@ -36,10 +36,10 @@ neoForge {
         minecraftVersion = project.parchment_minecraft_version
     }
 
-    // Access Transformers - we ship one to widen visibility on a couple of Create / SoS members
-    // when needed. NeoForge's moddev plugin will auto-detect this if present, but we declare it
-    // explicitly for clarity.
-    accessTransformers.add('src/main/resources/META-INF/accesstransformer.cfg')
+//    // Access Transformers - we ship one to widen visibility on a couple of Create / SoS members
+//    // when needed. NeoForge's moddev plugin will auto-detect this if present, but we declare it
+//    // explicitly for clarity.
+//    accessTransformers.from('src/main/resources/META-INF/accesstransformer.cfg')
 
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
