@@ -6,6 +6,8 @@ import net.minecraft.client.resources.sounds.AbstractTickableSoundInstance;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import org.neonalig.createpolyphony.instrument.InstrumentItem;
 
 /**
  * A single active musical note, played at the local player's position.
@@ -86,6 +88,14 @@ public class PolyphonyNoteSoundInstance extends AbstractTickableSoundInstance {
             this.x = p.getX();
             this.y = p.getY();
             this.z = p.getZ();
+
+            // Stop playing if the player is no longer holding an instrument in main hand or off-hand
+            ItemStack mainHand = p.getMainHandItem();
+            ItemStack offHand = p.getOffhandItem();
+            if (!(mainHand.getItem() instanceof InstrumentItem) &&
+                !(offHand.getItem() instanceof InstrumentItem)) {
+                stopped = true;
+            }
         }
 
         if (stopped) {
