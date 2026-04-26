@@ -171,11 +171,24 @@ public final class PolyphonyLinkManager {
         ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
         if (target == null) return;
 
+        // Sample lookup is keyed on GM program. By convention, channel 10 (index 9)
+        // is always percussion regardless of any ProgramChange it received - we
+        // map that to GM program 128 (Standard Drum Kit, 1-indexed) here so the
+        // client looks up the right "instruments.128.*" sound id.
+        int program;
+        if (channel == 9) {
+            program = 127; // 0-indexed; the client's 1-indexed sound id will be "128"
+        } else {
+            program = link.channelProgram(channel) & 0x7F;
+        }
+
+        // Even though the assignee's held InstrumentFamily isn't on the wire,
+        // we still resolve it server-side as a sanity check / debug breadcrumb.
         InstrumentFamily family = link.familyOf(assignee);
         if (family == null) return;
 
         PacketDistributor.sendToPlayer(target,
-            new PlayInstrumentNotePayload(family, channel, command, data1 & 0x7F, data2 & 0x7F));
+            new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
     }
 
     /**

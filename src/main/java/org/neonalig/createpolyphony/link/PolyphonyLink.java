@@ -125,6 +125,20 @@ public final class PolyphonyLink {
     }
 
     /**
+     * Returns the most recently observed GM program (0-127) for the given
+     * channel, or 0 (Acoustic Grand Piano) if the channel has not yet
+     * received a ProgramChange. By GM convention, channel 9 is always a
+     * percussion channel - we still return whatever ProgramChange (if any)
+     * was sent for it; the caller is responsible for the "channel 10 is
+     * drums" semantic if it cares.
+     */
+    public int channelProgram(int channel) {
+        if (channel < 0 || channel > 15) return 0;
+        int p = channelPrograms[channel];
+        return p < 0 ? 0 : p;
+    }
+
+    /**
      * Returns the UUID of the player currently assigned to play the given MIDI
      * channel, or {@code null} if no linked player is best suited (shouldn't
      * happen while at least one player is linked, since the round-robin
