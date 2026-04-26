@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -15,7 +16,6 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
-import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
 
@@ -104,10 +104,26 @@ public final class PolyphonyInteractionHandler {
     }
 
     @SubscribeEvent
-    public static void onPlayerTick(PlayerTickEvent.Post event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            PolyphonyLinkManager.validateActiveLink(player);
+    public static void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!(event.getCrafting().getItem() instanceof InstrumentItem)) return;
+        if (InstrumentLinkData.isLinked(event.getCrafting())) return;
+        if (!containsSingleInstrument(event.getInventory())) return;
+
+        // Craft-cleaning a linked instrument is an explicit unlink action.
+        PolyphonyLinkManager.unlink(player);
+    }
+
+    private static boolean containsSingleInstrument(Container container) {
+        ItemStack found = ItemStack.EMPTY;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.isEmpty()) continue;
+            if (!found.isEmpty()) return false;
+            if (!(stack.getItem() instanceof InstrumentItem)) return false;
+            found = stack;
         }
+        return !found.isEmpty();
     }
 
 }

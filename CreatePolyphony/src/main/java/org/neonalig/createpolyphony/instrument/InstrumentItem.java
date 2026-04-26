@@ -46,10 +46,12 @@ public class InstrumentItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext ctx, List<Component> tooltip, TooltipFlag flag) {
         super.appendHoverText(stack, ctx, tooltip, flag);
-        tooltip.add(Component.translatable("tooltip.createpolyphony.instrument.hint")
-            .withStyle(net.minecraft.ChatFormatting.GRAY));
-
         InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
+        String hintKey = target == null
+            ? "tooltip.createpolyphony.instrument.hint"
+            : "tooltip.createpolyphony.instrument.hint.unlink";
+        tooltip.add(Component.translatable(hintKey).withStyle(net.minecraft.ChatFormatting.GRAY));
+
         if (target != null) {
             tooltip.add(Component.translatable("tooltip.createpolyphony.linked", target.coords())
                 .withStyle(net.minecraft.ChatFormatting.AQUA));

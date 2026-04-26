@@ -5,8 +5,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.CreatePolyphony;
@@ -95,8 +95,8 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        // Ensure only the currently active held instrument carries the runtime link marker.
-        clearLinkedMarkersOnHands(player);
+        // Ensure only one carried instrument keeps the runtime link marker.
+        clearLinkedMarkersInInventory(player);
 
         PolyphonyLink link = LINKS.computeIfAbsent(newKey, k -> new PolyphonyLink(k.levelPath, pos));
         link.addOrRefreshPlayer(player, heldStack);
@@ -133,22 +133,11 @@ public final class PolyphonyLinkManager {
             if (link.isEmpty()) LINKS.remove(key);
         }
         if (messageTarget != null) {
-            clearLinkedMarkersOnHands(messageTarget);
+            clearLinkedMarkersInInventory(messageTarget);
             messageTarget.displayClientMessage(
                 Component.translatable("message.createpolyphony.unlinked"), true);
         }
         return true;
-    }
-
-    /**
-     * Ensure currently linked players still hold their linked instrument in
-     * either hand. If they don't, unlink immediately.
-     */
-    public static void validateActiveLink(ServerPlayer player) {
-        LinkKey key = PLAYER_LINK.get(player.getUUID());
-        if (key == null) return;
-        if (holdsLinkedInstrument(player, key)) return;
-        unlink(player);
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -204,9 +193,7 @@ public final class PolyphonyLinkManager {
 
         LinkKey key = LinkKey.of(level, pos);
         if (!holdsLinkedInstrument(target, key)) {
-            // If the linked item left the player's hands between tick checks,
-            // stop routing immediately on the hot path too.
-            unlink(assignee, target);
+            // Keep the link registered, but mute while the linked instrument is not in hand.
             return;
         }
 
@@ -246,7 +233,11 @@ public final class PolyphonyLinkManager {
         return InstrumentItem.familyOf(off) != null && InstrumentLinkData.matches(off, key);
     }
 
-    private static void clearLinkedMarkersOnHands(ServerPlayer player) {
+    private static void clearLinkedMarkersInInventory(ServerPlayer player) {
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            InstrumentLinkData.clearLinked(player.getInventory().getItem(i));
+        }
+        // Defensive: ensure slot views are also cleared.
         InstrumentLinkData.clearLinked(player.getItemBySlot(EquipmentSlot.MAINHAND));
         InstrumentLinkData.clearLinked(player.getItemBySlot(EquipmentSlot.OFFHAND));
     }

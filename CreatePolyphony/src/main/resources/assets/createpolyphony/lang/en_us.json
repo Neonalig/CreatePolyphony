@@ -23,6 +23,7 @@
   "instrument.createpolyphony.drum_kit": "Drum Kit",
 
   "tooltip.createpolyphony.instrument.hint": "Right-click a Tracker Bar to link",
+  "tooltip.createpolyphony.instrument.hint.unlink": "Right-click the Tracker Bar again to unlink",
   "tooltip.createpolyphony.linked": "Linked to Tracker Bar at %s",
 
   "message.createpolyphony.linked": "Linked to Tracker Bar - notes for %s will route to your %s",
