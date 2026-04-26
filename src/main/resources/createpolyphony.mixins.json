@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "org.neonalig.createpolyphony.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "createpolyphony.refmap.json",
+  "client": [],
+  "mixins": [
+    "TrackerBarBlockEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

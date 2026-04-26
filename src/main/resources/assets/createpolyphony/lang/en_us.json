@@ -1,5 +1,29 @@
 {
-	"itemGroup.createpolyphony": "Example Mod Tab",
-	"block.createpolyphony.example_block": "Example Block",
-	"item.createpolyphony.example_item": "Example Item"
+  "itemGroup.createpolyphony.polyphony": "Create: Polyphony",
+
+  "item.createpolyphony.piano": "Piano",
+  "item.createpolyphony.acoustic_guitar": "Acoustic Guitar",
+  "item.createpolyphony.electric_guitar": "Electric Guitar",
+  "item.createpolyphony.bass_guitar": "Bass Guitar",
+  "item.createpolyphony.violin": "Violin",
+  "item.createpolyphony.trumpet": "Trumpet",
+  "item.createpolyphony.flute": "Flute",
+  "item.createpolyphony.accordion": "Accordion",
+  "item.createpolyphony.drum_kit": "Drum Kit",
+
+  "instrument.createpolyphony.piano": "Piano",
+  "instrument.createpolyphony.acoustic_guitar": "Acoustic Guitar",
+  "instrument.createpolyphony.electric_guitar": "Electric Guitar",
+  "instrument.createpolyphony.bass_guitar": "Bass Guitar",
+  "instrument.createpolyphony.violin": "Violin",
+  "instrument.createpolyphony.trumpet": "Trumpet",
+  "instrument.createpolyphony.flute": "Flute",
+  "instrument.createpolyphony.accordion": "Accordion",
+  "instrument.createpolyphony.drum_kit": "Drum Kit",
+
+  "tooltip.createpolyphony.instrument.hint": "Right-click a Tracker Bar to link",
+  "tooltip.createpolyphony.linked": "Linked to Tracker Bar at %s",
+
+  "message.createpolyphony.linked": "Linked to Tracker Bar - notes for %s will route to your %s",
+  "message.createpolyphony.unlinked": "Unlinked from Tracker Bar"
 }

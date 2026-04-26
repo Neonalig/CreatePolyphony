@@ -10,6 +10,15 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    // Create + ecosystem (Flywheel, Ponder)
+    maven { url = 'https://maven.createmod.net' }
+    // Registrate
+    maven { url = 'https://mvn.devos.one/snapshots' }
+    // Fuzs / mod resources (transitive helper used by some Create addons)
+    maven { url = 'https://raw.githubusercontent.com/Fuzss/modresources/main/maven/' }
+    // JitPack - used to resolve Create: Sound of Steam directly from its GitHub repo,
+    // since the mod itself is not currently published to a public Maven.
+    maven { url = 'https://jitpack.io' }
 }
 
 base {
@@ -27,8 +36,10 @@ neoForge {
         minecraftVersion = project.parchment_minecraft_version
     }
 
-    // This line is optional. Access Transformers are automatically detected
-    // accessTransformers.add('src/main/resources/META-INF/accesstransformer.cfg')
+//    // Access Transformers - we ship one to widen visibility on a couple of Create / SoS members
+//    // when needed. NeoForge's moddev plugin will auto-detect this if present, but we declare it
+//    // explicitly for clarity.
+//    accessTransformers.from('src/main/resources/META-INF/accesstransformer.cfg')
 
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
@@ -95,27 +106,55 @@ neoForge {
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 
+// Mixin annotation processor needs to know where to put the refmap.
+// We name it after the mod id to avoid clashes with Create / SoS / etc.
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+}
+
 dependencies {
-    // Example mod dependency with JEI
-    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
-    // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
-    // compileOnly "mezz.jei:jei-${mc_version}-forge-api:${jei_version}"
-    // runtimeOnly "mezz.jei:jei-${mc_version}-forge:${jei_version}"
+    // ---- Mixin (annotation processor only; Mixin runtime is provided by NeoForge) -------------
+    annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
 
-    // Example mod dependency using a mod jar from ./libs with a flat dir repository
-    // This maps to ./libs/coolmod-${mc_version}-${coolmod_version}.jar
-    // The group id is ignored when searching -- in this case, it is "blank"
-    // implementation "blank:coolmod-${mc_version}:${coolmod_version}"
+    // ---- Create + ecosystem (compile + runtime) ----------------------------------------------
+    // The :slim classifier excludes Create's bundled libs we don't need at compile time.
+    implementation("com.simibubi.create:create-${minecraft_version}:${create_version}:slim") {
+        transitive = false
+    }
+    implementation("net.createmod.ponder:Ponder-NeoForge-${minecraft_version}:${ponder_version}")
+    compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
+    runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
+    implementation("com.tterrag.registrate:Registrate:${registrate_version}")
 
-    // Example mod dependency using a file as dependency
-    // implementation files("libs/coolmod-${mc_version}-${coolmod_version}.jar")
+    // MixinExtras - jar-in-jar so we have a known good version at runtime even if other mods don't bundle it.
+    implementation(jarJar("io.github.llamalad7:mixinextras-neoforge:${mixin_extras_version}"))
 
-    // Example project dependency using a sister or child project:
-    // implementation project(":myproject")
+    // ---- Create: Sound of Steam (the mod we extend) ------------------------------------------
+    // Resolved via JitPack from https://github.com/CSOS-Team/SoundOfSteam (1.21-neoforge branch).
+    // JitPack will build the repo on first request; subsequent builds are cached.
+    // We mark it compileOnly because at runtime we expect the user to have installed the
+    // released SoS jar via the mods/ folder (or for `runClient` to pull it from JitPack as well).
+    compileOnly("com.github.CSOS-Team:SoundOfSteam:${sos_version}") {
+        // The JitPack-built jar already bundles its own deps via shading; we only need its API
+        // surface for compilation, so suppress its transitive graph.
+        transitive = false
+    }
+    // Optionally pull it in at runtime too, so `runClient` works without manually placing the jar.
+    // Comment this line out and drop the SoS jar into run/mods/ if JitPack is unavailable offline.
+    runtimeOnly("com.github.CSOS-Team:SoundOfSteam:${sos_version}") {
+        transitive = false
+    }
+}
 
-    // For more info:
-    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
-    // http://www.gradle.org/docs/current/userguide/dependency_management.html
+// Force UTF-8 for source compilation, and tell the Mixin annotation processor where
+// to write the generated refmap. The refmap filename must match the one referenced from
+// our mixin config JSON (src/main/resources/createpolyphony.mixins.json).
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += [
+        "-AoutRefMapFile=${buildDir}/refmaps/${mod_id}.refmap.json".toString(),
+        "-AdefaultObfuscationEnv=named:srg"
+    ]
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
