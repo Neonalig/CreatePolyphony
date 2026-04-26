@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.link;
+package org.neonalig.createpolyphony.link;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;

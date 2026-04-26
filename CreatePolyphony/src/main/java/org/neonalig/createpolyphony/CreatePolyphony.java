@@ -8,6 +8,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.neonalig.createpolyphony.registry.CPCreativeTabs;
 import org.neonalig.createpolyphony.registry.CPItems;
+import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
 import org.neonalig.createpolyphony.registry.CPSounds;
 import org.slf4j.Logger;
 
@@ -37,6 +38,7 @@ public final class CreatePolyphony {
         CPItems.register(modEventBus);
         CPSounds.register(modEventBus);
         CPCreativeTabs.register(modEventBus);
+        CPRecipeSerializers.register(modEventBus);
 
         // Common setup hook (logging only for now).
         modEventBus.addListener(this::commonSetup);
