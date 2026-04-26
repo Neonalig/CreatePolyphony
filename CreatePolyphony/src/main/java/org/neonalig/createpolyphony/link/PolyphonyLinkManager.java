@@ -5,6 +5,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
@@ -17,6 +18,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -44,46 +46,43 @@ import java.util.UUID;
  */
 public final class PolyphonyLinkManager {
 
+    public enum LinkAction {
+        NOT_INSTRUMENT,
+        LINKED,
+        SWAPPED,
+        UNLINKED
+    }
+
     /** Map from (level dimension key path, BlockPos) -&gt; link. */
     private static final Map<LinkKey, PolyphonyLink> LINKS = new HashMap<>();
 
-    /** Reverse index from player UUID -&gt; the link they're linked to (max one). */
-    private static final Map<UUID, LinkKey> PLAYER_LINK = new HashMap<>();
+    /** Active held-link participation: player UUID -&gt; links currently in hand/off-hand. */
+    private static final Map<UUID, Map<LinkKey, InstrumentFamily>> ACTIVE_HAND_LINKS = new HashMap<>();
 
     private PolyphonyLinkManager() {}
 
     // ---- public API used by interaction handler -----------------------------------------------
 
     /**
-     * Link {@code player} (holding {@code heldStack}) to the tracker at
-     * {@code pos}. If the player was previously linked to a different tracker,
-     * they are unlinked from it first.
+     * Toggle-link the held instrument stack to the tracker at {@code pos}.
      *
-     * @return the resulting link, or {@code null} if the held item is not an
-     *         {@link InstrumentItem}.
+     * <p>Links are stored on each item stack, so a player can keep multiple
+     * linked instruments prepared at once.</p>
      */
-    @Nullable
-    public static PolyphonyLink link(ServerPlayer player, ServerLevel level, BlockPos pos, ItemStack heldStack) {
+    public static LinkAction linkOrToggle(ServerPlayer player, ServerLevel level, BlockPos pos, ItemStack heldStack) {
         InstrumentFamily family = InstrumentItem.familyOf(heldStack);
-        if (family == null) return null;
+        if (family == null) return LinkAction.NOT_INSTRUMENT;
 
-        UUID id = player.getUUID();
         LinkKey newKey = LinkKey.of(level, pos);
-
-        // Drop any prior link.
-        LinkKey prior = PLAYER_LINK.get(id);
-        if (prior != null && !prior.equals(newKey)) {
-            PolyphonyLink old = LINKS.get(prior);
-            if (old != null) {
-                old.removePlayer(id);
-                if (old.isEmpty()) LINKS.remove(prior);
-            }
+        if (InstrumentLinkData.matches(heldStack, newKey)) {
+            InstrumentLinkData.clearLinked(heldStack);
+            syncPlayerHeldLinks(player);
+            player.displayClientMessage(Component.translatable("message.createpolyphony.unlinked"), true);
+            return LinkAction.UNLINKED;
         }
 
-        PolyphonyLink link = LINKS.computeIfAbsent(newKey, k -> new PolyphonyLink(k.levelPath, pos));
-        link.addOrRefreshPlayer(player, heldStack);
-        PLAYER_LINK.put(id, newKey);
-
+        InstrumentLinkData.setLinked(heldStack, newKey);
+        syncPlayerHeldLinks(player);
         player.displayClientMessage(
             Component.translatable("message.createpolyphony.linked",
                 "Tracker Bar @ " + pos.toShortString(),
@@ -91,33 +90,53 @@ public final class PolyphonyLinkManager {
             true
         );
         CreatePolyphony.LOGGER.debug("Linked {} ({}) to {}", player.getName().getString(), family, newKey);
-        return link;
+        return LinkAction.LINKED;
     }
 
-    /**
-     * Unlink the given player from whichever tracker they're currently linked
-     * to (no-op if not linked).
-     *
-     * @return {@code true} if the player was unlinked.
-     */
-    public static boolean unlink(ServerPlayer player) {
-        return unlink(player.getUUID(), player);
-    }
-
-    /** Internal: unlink by UUID, optionally messaging the player if online. */
-    public static boolean unlink(UUID id, @Nullable ServerPlayer messageTarget) {
-        LinkKey key = PLAYER_LINK.remove(id);
-        if (key == null) return false;
-        PolyphonyLink link = LINKS.get(key);
-        if (link != null) {
-            link.removePlayer(id);
-            if (link.isEmpty()) LINKS.remove(key);
-        }
-        if (messageTarget != null) {
-            messageTarget.displayClientMessage(
-                Component.translatable("message.createpolyphony.unlinked"), true);
-        }
+    /** Explicit unlink action for the currently used instrument stack. */
+    public static boolean unlinkHeldInstrument(ServerPlayer player, ItemStack heldStack) {
+        if (InstrumentItem.familyOf(heldStack) == null) return false;
+        if (!InstrumentLinkData.isLinked(heldStack)) return false;
+        InstrumentLinkData.clearLinked(heldStack);
+        syncPlayerHeldLinks(player);
+        player.displayClientMessage(Component.translatable("message.createpolyphony.unlinked"), true);
         return true;
+    }
+
+    /** Reconcile active link membership from linked instruments in main/off hand. */
+    public static void syncPlayerHeldLinks(ServerPlayer player) {
+        UUID id = player.getUUID();
+        Map<LinkKey, InstrumentFamily> desired = desiredHeldLinks(player);
+        Map<LinkKey, InstrumentFamily> current = ACTIVE_HAND_LINKS.get(id);
+
+        if (current != null) {
+            for (LinkKey key : Set.copyOf(current.keySet())) {
+                if (desired.containsKey(key)) continue;
+                PolyphonyLink link = LINKS.get(key);
+                if (link != null) {
+                    link.removePlayer(id);
+                    if (link.isEmpty()) LINKS.remove(key);
+                }
+            }
+        }
+
+        for (Map.Entry<LinkKey, InstrumentFamily> entry : desired.entrySet()) {
+            LinkKey key = entry.getKey();
+            InstrumentFamily family = entry.getValue();
+            if (current != null && family == current.get(key)) continue;
+
+            PolyphonyLink link = LINKS.computeIfAbsent(key, k -> new PolyphonyLink(k.levelPath(), k.pos()));
+            ItemStack stack = findHeldStackFor(player, key, family);
+            if (!stack.isEmpty()) {
+                link.addOrRefreshPlayer(player, stack);
+            }
+        }
+
+        if (desired.isEmpty()) {
+            ACTIVE_HAND_LINKS.remove(id);
+        } else {
+            ACTIVE_HAND_LINKS.put(id, desired);
+        }
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -127,10 +146,6 @@ public final class PolyphonyLinkManager {
         return LINKS.get(LinkKey.of(sl, pos));
     }
 
-    /** True iff the given player is linked to <em>any</em> tracker. */
-    public static boolean isLinked(UUID id) {
-        return PLAYER_LINK.containsKey(id);
-    }
 
     // ---- dispatch path (called from the TrackerBar mixin) -------------------------------------
 
@@ -171,6 +186,12 @@ public final class PolyphonyLinkManager {
         ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
         if (target == null) return;
 
+        LinkKey key = LinkKey.of(level, pos);
+        if (!holdsLinkedInstrument(target, key)) {
+            // Keep the link registered, but mute while the linked instrument is not in hand.
+            return;
+        }
+
         // Sample lookup is keyed on GM program. By convention, channel 10 (index 9)
         // is always percussion regardless of any ProgramChange it received - we
         // map that to GM program 128 (Standard Drum Kit, 1-indexed) here so the
@@ -191,12 +212,50 @@ public final class PolyphonyLinkManager {
             new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
     }
 
-    /**
-     * Drop all links involving the given player UUID. Called on player logout
-     * to keep state tidy.
-     */
-    public static void onPlayerLogout(UUID id) {
-        unlink(id, null);
+    /** Drop active held-link participation for a logging-out player. */
+    public static void onPlayerLogout(ServerPlayer player) {
+        UUID id = player.getUUID();
+        Map<LinkKey, InstrumentFamily> current = ACTIVE_HAND_LINKS.remove(id);
+        if (current == null) return;
+        for (LinkKey key : current.keySet()) {
+            PolyphonyLink link = LINKS.get(key);
+            if (link == null) continue;
+            link.removePlayer(id);
+            if (link.isEmpty()) LINKS.remove(key);
+        }
+    }
+
+    private static boolean holdsLinkedInstrument(ServerPlayer player, LinkKey key) {
+        ItemStack main = player.getItemBySlot(EquipmentSlot.MAINHAND);
+        if (InstrumentItem.familyOf(main) != null && InstrumentLinkData.matches(main, key)) return true;
+
+        ItemStack off = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        return InstrumentItem.familyOf(off) != null && InstrumentLinkData.matches(off, key);
+    }
+
+    private static Map<LinkKey, InstrumentFamily> desiredHeldLinks(ServerPlayer player) {
+        Map<LinkKey, InstrumentFamily> desired = new HashMap<>();
+        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.MAINHAND));
+        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND));
+        return desired;
+    }
+
+    private static void collectHeldLink(Map<LinkKey, InstrumentFamily> out, ItemStack stack) {
+        InstrumentFamily family = InstrumentItem.familyOf(stack);
+        if (family == null) return;
+        InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
+        if (target == null) return;
+        out.put(new LinkKey(target.levelPath(), target.pos().immutable()), family);
+    }
+
+    private static ItemStack findHeldStackFor(ServerPlayer player, LinkKey key, InstrumentFamily family) {
+        ItemStack main = player.getItemBySlot(EquipmentSlot.MAINHAND);
+        if (InstrumentItem.familyOf(main) == family && InstrumentLinkData.matches(main, key)) return main;
+
+        ItemStack off = player.getItemBySlot(EquipmentSlot.OFFHAND);
+        if (InstrumentItem.familyOf(off) == family && InstrumentLinkData.matches(off, key)) return off;
+
+        return ItemStack.EMPTY;
     }
 
     /**

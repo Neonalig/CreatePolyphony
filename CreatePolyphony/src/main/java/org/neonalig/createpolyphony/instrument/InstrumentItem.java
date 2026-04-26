@@ -5,6 +5,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import org.jetbrains.annotations.Nullable;
+import org.neonalig.createpolyphony.link.InstrumentLinkData;
 
 import java.util.List;
 
@@ -45,7 +46,28 @@ public class InstrumentItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext ctx, List<Component> tooltip, TooltipFlag flag) {
         super.appendHoverText(stack, ctx, tooltip, flag);
-        tooltip.add(Component.translatable("tooltip.createpolyphony.instrument.hint")
-            .withStyle(net.minecraft.ChatFormatting.GRAY));
+        InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
+        String hintKey = target == null
+            ? "tooltip.createpolyphony.instrument.hint"
+            : "tooltip.createpolyphony.instrument.hint.unlink";
+        tooltip.add(Component.translatable(hintKey).withStyle(net.minecraft.ChatFormatting.GRAY));
+
+        if (target != null) {
+            tooltip.add(Component.translatable("tooltip.createpolyphony.linked", target.coords())
+                .withStyle(net.minecraft.ChatFormatting.AQUA));
+        }
+    }
+
+    @Override
+    public boolean isFoil(ItemStack stack) {
+        return InstrumentLinkData.isLinked(stack) || super.isFoil(stack);
+    }
+
+    @Override
+    public Component getName(ItemStack stack) {
+        Component base = super.getName(stack);
+        InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
+        if (target == null) return base;
+        return Component.translatable("item.createpolyphony.linked_name", base, target.coords());
     }
 }

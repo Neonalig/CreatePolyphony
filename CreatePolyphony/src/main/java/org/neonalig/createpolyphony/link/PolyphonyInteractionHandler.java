@@ -15,6 +15,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
 
@@ -68,15 +69,15 @@ public final class PolyphonyInteractionHandler {
 
         // Sneak-right-click = explicit unlink; otherwise (re)link.
         if (player.isShiftKeyDown()) {
-            if (PolyphonyLinkManager.unlink(player)) {
+            if (PolyphonyLinkManager.unlinkHeldInstrument(player, held)) {
                 event.setCancellationResult(InteractionResult.SUCCESS);
                 event.setCanceled(true);
             }
             return;
         }
 
-        PolyphonyLink link = PolyphonyLinkManager.link(player, sl, pos, held);
-        if (link != null) {
+        PolyphonyLinkManager.LinkAction action = PolyphonyLinkManager.linkOrToggle(player, sl, pos, held);
+        if (action != PolyphonyLinkManager.LinkAction.NOT_INSTRUMENT) {
             // Cancel the vanilla GUI-open path so right-clicking with an instrument
             // doesn't also open the tracker bar's UI - linking is a distinct gesture.
             event.setCancellationResult(InteractionResult.SUCCESS);
@@ -98,8 +99,16 @@ public final class PolyphonyInteractionHandler {
     @SubscribeEvent
     public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer sp) {
-            PolyphonyLinkManager.onPlayerLogout(sp.getUUID());
+            PolyphonyLinkManager.onPlayerLogout(sp);
         }
     }
+
+    @SubscribeEvent
+    public static void onPlayerTick(PlayerTickEvent.Post event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            PolyphonyLinkManager.syncPlayerHeldLinks(player);
+        }
+    }
+
 
 }
