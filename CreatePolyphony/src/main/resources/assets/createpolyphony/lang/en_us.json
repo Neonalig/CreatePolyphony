@@ -10,6 +10,7 @@
   "item.createpolyphony.flute": "Flute",
   "item.createpolyphony.accordion": "Accordion",
   "item.createpolyphony.drum_kit": "Drum Kit",
+  "item.createpolyphony.linked_name": "%s @ %s",
 
   "instrument.createpolyphony.piano": "Piano",
   "instrument.createpolyphony.acoustic_guitar": "Acoustic Guitar",
