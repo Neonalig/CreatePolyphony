@@ -6,8 +6,8 @@ import org.spongepowered.asm.mixin.Mixin;
  * Mixin into Sound of Steam's {@code com.finchy.pipeorgans.content.midi.trackerBar.TrackerBarBlockEntity}.
  *
  * <p>The full implementation (an {@code @Inject} on {@code handleNote(ShortMessage)}
- * that dispatches the note to all {@link org.neonalig.createpolyphony.link.PolyphonyLinkManager}
- * linked players) is added in the dispatch step of the build.</p>
+ * that dispatches the note to all {@code PolyphonyLinkManager}-linked players)
+ * is added in the dispatch step of the build.</p>
  *
  * <p>This stub exists now so that:</p>
  * <ul>
