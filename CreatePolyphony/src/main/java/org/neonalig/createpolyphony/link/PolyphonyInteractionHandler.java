@@ -75,8 +75,8 @@ public final class PolyphonyInteractionHandler {
             return;
         }
 
-        PolyphonyLink link = PolyphonyLinkManager.link(player, sl, pos, held);
-        if (link != null) {
+        PolyphonyLinkManager.LinkAction action = PolyphonyLinkManager.linkOrToggle(player, sl, pos, held);
+        if (action != PolyphonyLinkManager.LinkAction.NOT_INSTRUMENT) {
             // Cancel the vanilla GUI-open path so right-clicking with an instrument
             // doesn't also open the tracker bar's UI - linking is a distinct gesture.
             event.setCancellationResult(InteractionResult.SUCCESS);

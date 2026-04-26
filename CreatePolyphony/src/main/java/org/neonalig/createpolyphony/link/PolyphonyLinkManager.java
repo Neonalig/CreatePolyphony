@@ -44,6 +44,13 @@ import java.util.UUID;
  */
 public final class PolyphonyLinkManager {
 
+    public enum LinkAction {
+        NOT_INSTRUMENT,
+        LINKED,
+        SWAPPED,
+        UNLINKED
+    }
+
     /** Map from (level dimension key path, BlockPos) -&gt; link. */
     private static final Map<LinkKey, PolyphonyLink> LINKS = new HashMap<>();
 
@@ -62,17 +69,24 @@ public final class PolyphonyLinkManager {
      * @return the resulting link, or {@code null} if the held item is not an
      *         {@link InstrumentItem}.
      */
-    @Nullable
-    public static PolyphonyLink link(ServerPlayer player, ServerLevel level, BlockPos pos, ItemStack heldStack) {
+    public static LinkAction linkOrToggle(ServerPlayer player, ServerLevel level, BlockPos pos, ItemStack heldStack) {
         InstrumentFamily family = InstrumentItem.familyOf(heldStack);
-        if (family == null) return null;
+        if (family == null) return LinkAction.NOT_INSTRUMENT;
 
         UUID id = player.getUUID();
         LinkKey newKey = LinkKey.of(level, pos);
+        boolean swapped = false;
 
-        // Drop any prior link.
+        // Right-clicking the same tracker again toggles unlink.
         LinkKey prior = PLAYER_LINK.get(id);
+        if (newKey.equals(prior)) {
+            unlink(player);
+            return LinkAction.UNLINKED;
+        }
+
+        // Drop any prior link if we are moving to a different tracker.
         if (prior != null && !prior.equals(newKey)) {
+            swapped = true;
             PolyphonyLink old = LINKS.get(prior);
             if (old != null) {
                 old.removePlayer(id);
@@ -91,7 +105,7 @@ public final class PolyphonyLinkManager {
             true
         );
         CreatePolyphony.LOGGER.debug("Linked {} ({}) to {}", player.getName().getString(), family, newKey);
-        return link;
+        return swapped ? LinkAction.SWAPPED : LinkAction.LINKED;
     }
 
     /**
