@@ -34,6 +34,8 @@ import org.neonalig.createpolyphony.instrument.InstrumentItem;
  * its class. That way our compiled bytecode doesn't carry a hard reference to
  * Sound of Steam and the mod can still load (just inert) if SoS is missing.</p>
  */
+@SuppressWarnings("removal") // EventBusSubscriber.Bus is deprecated but still functional in 1.21.1; matches the
+                              // pattern used by the NeoForge MDK template's Config.java in this project.
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME)
 public final class PolyphonyInteractionHandler {
 

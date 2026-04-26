@@ -14,6 +14,8 @@ import org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler;
  * sent server-to-client whenever a tracker bar emits a note that should be
  * played on the recipient's held instrument.</p>
  */
+@SuppressWarnings("removal") // EventBusSubscriber.Bus is deprecated but still functional in 1.21.1; matches the
+                              // pattern used by the NeoForge MDK template's Config.java in this project.
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.MOD)
 public final class CPNetwork {
 
