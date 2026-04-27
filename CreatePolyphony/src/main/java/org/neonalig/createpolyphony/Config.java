@@ -44,7 +44,7 @@ public class Config {
     public static final ModConfigSpec.BooleanValue ONE_MAN_BAND_USE_ALL_GM_PROGRAMS = BUILDER
         .comment("If true, One Man Band uses raw MIDI programs for full GM playback.",
             "If false, One Man Band snaps to supported instrument families only.")
-        .define("oneManBandUseAllGmPrograms", true);
+        .define("oneManBandUseAllGmPrograms", false);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 

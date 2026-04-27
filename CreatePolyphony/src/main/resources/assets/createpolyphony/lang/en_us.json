@@ -10,7 +10,9 @@
   "item.createpolyphony.flute": "Flute",
   "item.createpolyphony.accordion": "Accordion",
   "item.createpolyphony.drum_kit": "Drum Kit",
-  "item.createpolyphony.one_man_band": "One Man Band",
+  "item.createpolyphony.one_man_band": "One Steve Band",
+  "item.createpolyphony.one_steve_band": "One Steve Band",
+  "item.createpolyphony.one_alex_band": "One Alex Band",
   "item.createpolyphony.linked_name": "%s @ %s",
 
   "instrument.createpolyphony.piano": "Piano",
