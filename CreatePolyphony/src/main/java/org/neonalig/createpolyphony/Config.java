@@ -23,7 +23,7 @@ public class Config {
         .defineInRange("ringBufferBytes", 44_100, 8_192, 1_048_576);
 
     public static final ModConfigSpec.IntValue PUMP_CHUNK_BYTES = BUILDER
-        .comment("How many PCM bytes the synth pump thread requests from Gervill per read.")
+        .comment("How many PCM bytes each synth render chunk targets during manual SoundFont synthesis.")
         .defineInRange("pumpChunkBytes", 4_096, 512, 65_536);
 
     public static final ModConfigSpec.IntValue ADAPTIVE_MIN_SUBCHUNK_BYTES = BUILDER

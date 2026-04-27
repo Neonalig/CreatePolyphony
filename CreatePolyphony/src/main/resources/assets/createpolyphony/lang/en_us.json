@@ -63,7 +63,7 @@
   "createpolyphony.configuration.ringBufferBytes": "PCM Ring Buffer (Bytes)",
   "createpolyphony.configuration.ringBufferBytes.tooltip": "Size of the PCM bridge buffer between synth generation and Minecraft audio playback.",
   "createpolyphony.configuration.pumpChunkBytes": "Pump Chunk Size (Bytes)",
-  "createpolyphony.configuration.pumpChunkBytes.tooltip": "How many PCM bytes are pulled from Gervill per synth pump iteration.",
+  "createpolyphony.configuration.pumpChunkBytes.tooltip": "Target PCM bytes per synth render chunk. Lower values improve responsiveness; higher values reduce CPU wakeups.",
   "createpolyphony.configuration.adaptiveMinSubchunkBytes": "Adaptive Min Subchunk (Bytes)",
   "createpolyphony.configuration.adaptiveMinSubchunkBytes.tooltip": "Lower bound for adaptive stream subchunk size. Higher values are steadier but less responsive.",
   "createpolyphony.configuration.adaptiveMaxSubchunkBytes": "Adaptive Max Subchunk (Bytes)",
