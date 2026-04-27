@@ -30,15 +30,27 @@ final class Oscillator {
         this.data = data;
         this.loopMode = loopMode;
         this.sampleRate = sampleRate;
-        this.start = start;
-        this.end = end;
-        this.startLoop = startLoop;
-        this.endLoop = endLoop;
+        // Clamp start/end defensively within data bounds to avoid AIOOBE on malformed SF2 files.
+        int maxIdx = data.length - 1;
+        this.start = Math.max(0, Math.min(start, maxIdx));
+        this.end = Math.max(1, Math.min(end, maxIdx));
+        // Loop points may be bogus in non-spec-compliant fonts; clamp and fall back to no-loop if invalid.
+        int clampedStartLoop = Math.max(this.start, Math.min(startLoop, this.end - 1));
+        int clampedEndLoop = Math.max(clampedStartLoop + 1, Math.min(endLoop, this.end));
+        if (clampedStartLoop >= clampedEndLoop) {
+            // Loop window collapsed - force no-loop so the sample plays once and exits cleanly.
+            this.startLoop = this.start;
+            this.endLoop = this.end;
+            this.loopMode = LoopMode.NO_LOOP;
+        } else {
+            this.startLoop = clampedStartLoop;
+            this.endLoop = clampedEndLoop;
+        }
         this.rootKey = rootKey;
         this.tune = coarseTune + 0.01F * fineTune;
         this.pitchChangeScale = 0.01F * scaleTuning;
         this.sampleRateRatio = (float) sampleRate / synthesizer.sampleRate();
-        this.looping = loopMode != LoopMode.NO_LOOP;
+        this.looping = this.loopMode != LoopMode.NO_LOOP;
         this.positionFp = (long) start << FRAC_BITS;
     }
 

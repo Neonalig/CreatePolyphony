@@ -144,6 +144,12 @@ public final class PolyphonyLink {
         return p < 0 ? 0 : p;
     }
 
+    /** Raw channel program state: -1 when unknown, else 0..127. */
+    public int channelProgramRaw(int channel) {
+        if (channel < 0 || channel > 15) return -1;
+        return channelPrograms[channel];
+    }
+
     /**
      * Returns the UUID of the player currently assigned to play the given MIDI
      * channel, or {@code null} if no linked players exist.

@@ -39,7 +39,23 @@ public final class PolyphonyClientTestCommands {
                         .executes(ctx -> updateConfig("ringBufferBytes", IntegerArgumentType.getInteger(ctx, "value")))))
                 .then(literal("pumpChunkBytes")
                     .then(argument("value", IntegerArgumentType.integer(512, 65_536))
-                        .executes(ctx -> updateConfig("pumpChunkBytes", IntegerArgumentType.getInteger(ctx, "value"))))))
+                        .executes(ctx -> updateConfig("pumpChunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("adaptiveMinSubchunkBytes")
+                    .then(argument("value", IntegerArgumentType.integer(256, 32_768))
+                        .executes(ctx -> updateConfig("adaptiveMinSubchunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("adaptiveMaxSubchunkBytes")
+                    .then(argument("value", IntegerArgumentType.integer(256, 65_536))
+                        .executes(ctx -> updateConfig("adaptiveMaxSubchunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("adaptiveTargetRenderNs")
+                    .then(argument("value", IntegerArgumentType.integer(250_000, 10_000_000))
+                        .executes(ctx -> updateConfig("adaptiveTargetRenderNs", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("adaptiveEwmaAlpha")
+                    .then(argument("value", IntegerArgumentType.integer(1, 100))
+                        .executes(ctx -> updateConfig("adaptiveEwmaAlphaPercent", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("preset")
+                    .then(literal("stable").executes(ctx -> applyPreset(Config.AudioTimingPreset.STABLE)))
+                    .then(literal("balanced").executes(ctx -> applyPreset(Config.AudioTimingPreset.BALANCED)))
+                    .then(literal("responsive").executes(ctx -> applyPreset(Config.AudioTimingPreset.RESPONSIVE)))))
             .then(literal("reloadSynth")
                 .executes(ctx -> reloadSynth()))
             .then(literal("panic")
@@ -67,13 +83,25 @@ public final class PolyphonyClientTestCommands {
             case "maxVoices" -> Config.MAX_VOICES.set(value);
             case "ringBufferBytes" -> Config.RING_BUFFER_BYTES.set(value);
             case "pumpChunkBytes" -> Config.PUMP_CHUNK_BYTES.set(value);
+            case "adaptiveMinSubchunkBytes" -> Config.ADAPTIVE_MIN_SUBCHUNK_BYTES.set(value);
+            case "adaptiveMaxSubchunkBytes" -> Config.ADAPTIVE_MAX_SUBCHUNK_BYTES.set(value);
+            case "adaptiveTargetRenderNs" -> Config.ADAPTIVE_TARGET_RENDER_NS.set(value);
+            case "adaptiveEwmaAlphaPercent" -> Config.ADAPTIVE_EWMA_ALPHA.set(Math.max(0.01D, Math.min(1.0D, value / 100.0D)));
             default -> {
                 tell("Unknown config key: " + key);
                 return 0;
             }
         }
+        Config.normalizeAdaptiveBounds();
         reloadSynth();
         tell("Updated " + key + " = " + value + " and reloaded synth.");
+        return 1;
+    }
+
+    private static int applyPreset(Config.AudioTimingPreset preset) {
+        Config.applyAudioTimingPreset(preset);
+        reloadSynth();
+        tell("Applied timing preset: " + preset.name().toLowerCase() + " and reloaded synth.");
         return 1;
     }
 

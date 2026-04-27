@@ -2,6 +2,7 @@ package org.neonalig.createpolyphony.synth.meltysynth;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.function.IntConsumer;
 
 public final class MeltySoundFont {
     private final File sourceFile;
@@ -33,6 +34,13 @@ public final class MeltySoundFont {
             throw new IOException("SoundFont file not found: " + file);
         }
         return new MeltySoundFont(file, new SoundFont(file));
+    }
+
+    public static MeltySoundFont load(File file, IntConsumer progressCallback) throws IOException {
+        if (file == null || !file.isFile()) {
+            throw new IOException("SoundFont file not found: " + file);
+        }
+        return new MeltySoundFont(file, new SoundFont(file, progressCallback));
     }
 
     SoundFont soundFont() {

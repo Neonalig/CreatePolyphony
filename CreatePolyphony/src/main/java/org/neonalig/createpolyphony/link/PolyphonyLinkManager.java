@@ -9,12 +9,14 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
 import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -65,6 +67,8 @@ public final class PolyphonyLinkManager {
     private static final Map<UUID, Map<LinkKey, InstrumentFamily>> ACTIVE_HAND_LINKS = new HashMap<>();
     /** Active note ownership per link: (channel,note) -> player UUID currently expected to receive NoteOff. */
     private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
+    /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
+    private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
 
     private PolyphonyLinkManager() {}
 
@@ -126,6 +130,7 @@ public final class PolyphonyLinkManager {
                     if (link.isEmpty()) {
                         LINKS.remove(key);
                         ACTIVE_NOTE_OWNERS.remove(key);
+                        CHANNEL_PROGRAM_SNAPSHOT.remove(key);
                     }
                 }
             }
@@ -136,7 +141,12 @@ public final class PolyphonyLinkManager {
             InstrumentFamily family = entry.getValue();
             if (current != null && family == current.get(key)) continue;
 
-            PolyphonyLink link = LINKS.computeIfAbsent(key, k -> new PolyphonyLink(k.levelPath(), k.pos()));
+            PolyphonyLink link = LINKS.get(key);
+            if (link == null) {
+                link = new PolyphonyLink(key.levelPath(), key.pos());
+                primeLinkProgramsFromSnapshot(key, link);
+                LINKS.put(key, link);
+            }
             ItemStack stack = findHeldStackFor(player, key, family);
             if (!stack.isEmpty()) {
                 link.addOrRefreshPlayer(player, stack);
@@ -175,14 +185,23 @@ public final class PolyphonyLinkManager {
      * @param data2     MIDI data byte 2 (velocity for NoteOn/Off; ignored for ProgramChange).
      */
     public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
+        int command = status & 0xF0;
+        int channel = status & 0x0F;
+        LinkKey key = LinkKey.of(level, pos);
+
+        if (command == 0xC0 /* ProgramChange */) {
+            rememberChannelProgram(key, channel, data1 & 0x7F);
+        }
+
         PolyphonyLink link = get(level, pos);
         if (link == null || link.isEmpty()) {
+            if (command == 0xC0) {
+                debugRoute("program:cached", level, pos, status, data1, data2, null);
+                return;
+            }
             debugRoute("drop:no-link", level, pos, status, data1, data2, null);
             return;
         }
-
-        int command = status & 0xF0;
-        int channel = status & 0x0F;
 
         // Track the latest GM program per channel so the assignment algorithm
         // can prefer matching instrument families.
@@ -201,7 +220,6 @@ public final class PolyphonyLinkManager {
         int note = data1 & 0x7F;
         int velocity = data2 & 0x7F;
         boolean noteOff = command == 0x80 || velocity == 0;
-        LinkKey key = LinkKey.of(level, pos);
         ActiveNoteKey activeNoteKey = new ActiveNoteKey(channel, note);
 
         if (noteOff) {
@@ -254,12 +272,17 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        // ONE_MAN_BAND uses the actual MIDI channel program to play every instrument
-        // exactly as the MIDI file intended. All other instruments use their canonical
-        // family program so playback timbre reflects the held item.
+        // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
+        // supported instrument families, controlled by config.
         int program;
         if (family.isWildcard()) {
-            program = link.channelProgram(channel);
+            int trackedProgram = trackedProgramFor(key, channel, link);
+            if (Config.oneManBandUsesAllGmPrograms()) {
+                program = trackedProgram;
+            } else {
+                InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, trackedProgram);
+                program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
+            }
         } else {
             program = (channel == 9) ? 127 : family.canonicalGmProgram();
         }
@@ -291,6 +314,7 @@ public final class PolyphonyLinkManager {
             if (link.isEmpty()) {
                 LINKS.remove(key);
                 ACTIVE_NOTE_OWNERS.remove(key);
+                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
             }
         }
     }
@@ -381,6 +405,43 @@ public final class PolyphonyLinkManager {
         if (InstrumentItem.familyOf(off) == family && InstrumentLinkData.matches(off, key)) return off;
 
         return ItemStack.EMPTY;
+    }
+
+    private static int trackedProgramFor(LinkKey key, int channel, PolyphonyLink link) {
+        if (channel < 0 || channel > 15) return 0;
+        int live = link.channelProgramRaw(channel);
+        if (live >= 0) {
+            return live & 0x7F;
+        }
+        int[] snapshot = CHANNEL_PROGRAM_SNAPSHOT.get(key);
+        if (snapshot != null) {
+            int cached = snapshot[channel];
+            if (cached >= 0) {
+                return cached & 0x7F;
+            }
+        }
+        return 0;
+    }
+
+    private static void rememberChannelProgram(LinkKey key, int channel, int program) {
+        if (channel < 0 || channel > 15) return;
+        int[] snapshot = CHANNEL_PROGRAM_SNAPSHOT.computeIfAbsent(key, ignored -> {
+            int[] arr = new int[16];
+            Arrays.fill(arr, -1);
+            return arr;
+        });
+        snapshot[channel] = program & 0x7F;
+    }
+
+    private static void primeLinkProgramsFromSnapshot(LinkKey key, PolyphonyLink link) {
+        int[] snapshot = CHANNEL_PROGRAM_SNAPSHOT.get(key);
+        if (snapshot == null) return;
+        for (int ch = 0; ch < 16; ch++) {
+            int p = snapshot[ch];
+            if (p >= 0) {
+                link.setChannelProgram(ch, p & 0x7F);
+            }
+        }
     }
 
     /**

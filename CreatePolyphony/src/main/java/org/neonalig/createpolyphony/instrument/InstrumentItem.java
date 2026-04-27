@@ -8,6 +8,8 @@ import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.link.InstrumentLinkData;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * A held musical instrument item.
@@ -21,6 +23,12 @@ import java.util.List;
  * <p>Stack size is 1 to mirror tools / instruments players typically wield.</p>
  */
 public class InstrumentItem extends Item {
+
+    private static final String ONE_STEVE_BAND_KEY = "item.createpolyphony.one_steve_band";
+    private static final String ONE_ALEX_BAND_KEY = "item.createpolyphony.one_alex_band";
+
+    // Client bootstrap replaces this supplier so name rendering can track current player model.
+    private static Supplier<String> oneManBandNameKeySupplier = () -> ONE_STEVE_BAND_KEY;
 
     private final InstrumentFamily family;
 
@@ -67,9 +75,22 @@ public class InstrumentItem extends Item {
 
     @Override
     public Component getName(ItemStack stack) {
-        Component base = super.getName(stack);
+        Component base;
+        if (family == InstrumentFamily.ONE_MAN_BAND) {
+            String key = oneManBandNameKeySupplier.get();
+            if (!ONE_ALEX_BAND_KEY.equals(key)) {
+                key = ONE_STEVE_BAND_KEY;
+            }
+            base = Component.translatable(key);
+        } else {
+            base = super.getName(stack);
+        }
         InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
         if (target == null) return base;
         return Component.translatable("item.createpolyphony.linked_name", base, target.coords());
+    }
+
+    public static void setOneManBandNameKeySupplier(Supplier<String> supplier) {
+        oneManBandNameKeySupplier = Objects.requireNonNullElseGet(supplier, () -> () -> ONE_STEVE_BAND_KEY);
     }
 }

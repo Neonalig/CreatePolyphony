@@ -1,6 +1,8 @@
 package org.neonalig.createpolyphony.client.sound;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.toasts.SystemToast;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.Nullable;
@@ -22,7 +24,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -103,12 +112,25 @@ public final class SoundFontManager {
 
     private final WatchService watchService;
     private final Thread watchThread;
+    private final ExecutorService loadExecutor;
+    private final AtomicInteger loadGeneration = new AtomicInteger();
+    @Nullable private volatile Future<?> activeLoadTask;
     private volatile boolean closed = false;
+    private volatile boolean loading = false;
+    @Nullable private volatile String pendingName = null;
+    private final AtomicInteger loadProgressPercent = new AtomicInteger(0);
+    private final Set<String> sessionLoadFailures = ConcurrentHashMap.newKeySet();
 
     private SoundFontManager(Path directory, @Nullable PolyphonySynthesizer synth) throws IOException {
         this.directory = directory;
         this.selectionFile = directory.resolve(SELECTION_FILE);
         this.synth = synth;
+        ThreadFactory threadFactory = runnable -> {
+            Thread thread = new Thread(runnable, "CreatePolyphony-SoundFontLoader");
+            thread.setDaemon(true);
+            return thread;
+        };
+        this.loadExecutor = Executors.newSingleThreadExecutor(threadFactory);
         this.watchService = directory.getFileSystem().newWatchService();
         directory.register(watchService,
             StandardWatchEventKinds.ENTRY_CREATE,
@@ -190,11 +212,33 @@ public final class SoundFontManager {
     /** The synth currently bound to the active soundfont, or {@code null} for "None". */
     @Nullable
     public PolyphonySynthesizer activeSynth() {
-        return activeName == null ? null : synth;
+        return (activeName == null || loading) ? null : synth;
+    }
+
+    public boolean isLoading() {
+        return loading;
+    }
+
+    @Nullable
+    public String pending() {
+        return pendingName;
+    }
+
+    /**
+     * Coarse 0..1 UI progress. Since SF2 decode is opaque, this is a smoothed
+     * time-based indicator while work is in progress.
+     */
+    public float loadingProgress01() {
+        if (!loading) return 1.0F;
+        return loadProgressPercent.get() / 100f;
     }
 
     public boolean synthesisAvailable() {
         return synth != null;
+    }
+
+    public boolean hasSessionLoadFailure(@Nullable String fileName) {
+        return fileName != null && sessionLoadFailures.contains(fileName);
     }
 
     public void addListener(Consumer<SoundFontManager> listener) {
@@ -214,51 +258,137 @@ public final class SoundFontManager {
      *         non-null but absent from the cached listing or failed to load.
      */
     public boolean setActive(@Nullable String fileName) {
+        if (closed) return false;
         if (fileName == null) {
-            // "None" - retire any currently-loaded patches and stop playing voices.
-            PolyphonyClientNoteHandler.panic();
-            if (synth != null) synth.unloadSoundFont();
-            activeName = null;
-            persistSelection();
-            notifyListeners();
-            CreatePolyphony.LOGGER.info("SoundFont selection cleared (None)");
-            return true;
+            return cancelLoadToNone();
         }
 
-        // Don't let callers pass arbitrary paths - we only accept basenames inside our dir.
-        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
-            CreatePolyphony.LOGGER.warn("Refusing suspicious soundfont path: {}", fileName);
+        // Only accept plain filenames that resolve to a file inside our directory.
+        // Use path normalization to catch traversal attempts rather than substring matching.
+        if (fileName.contains("/") || fileName.contains("\\")) {
+            CreatePolyphony.LOGGER.warn("Refusing soundfont path with directory separator: {}", fileName);
             return false;
         }
-        Path target = directory.resolve(fileName);
+        Path target = directory.resolve(fileName).normalize();
+        if (!target.startsWith(directory.normalize())) {
+            CreatePolyphony.LOGGER.warn("Refusing soundfont path outside soundfonts directory: {}", fileName);
+            return false;
+        }
         if (!Files.isRegularFile(target) || !fileName.toLowerCase(Locale.ROOT).endsWith(SF2_EXT)) {
             CreatePolyphony.LOGGER.warn("Soundfont not found or not an .sf2: {}", target);
             return false;
         }
-        if (Objects.equals(activeName, fileName)) {
+        if (Objects.equals(activeName, fileName) && !loading) {
             return true;
         }
-        try {
-            if (synth != null) {
-                // Force-stop current output before swap to avoid transitional hangs on busy trackers.
-                PolyphonyClientNoteHandler.panic();
-                synth.loadSoundFont(target.toFile());
-            } else {
-                CreatePolyphony.LOGGER.warn(
-                    "Selected soundfont {}, but synth backend is unavailable so playback remains muted.",
-                    fileName);
-            }
+        if (synth == null) {
+            CreatePolyphony.LOGGER.warn(
+                "Selected soundfont {}, but synth backend is unavailable so playback remains muted.",
+                fileName);
             activeName = fileName;
             persistSelection();
             notifyListeners();
             return true;
-        } catch (IOException ex) {
-            CreatePolyphony.LOGGER.error("Failed to load soundfont {}", target, ex);
-            return false;
+        }
+
+        cancelActiveLoadTask();
+
+        // Enter a silent transition state immediately so in-flight MIDI is dropped while loading.
+        final int generation = loadGeneration.incrementAndGet();
+        loading = true;
+        pendingName = fileName;
+        loadProgressPercent.set(0);
+        activeName = null;
+        PolyphonyClientNoteHandler.panic();
+        notifyListeners();
+
+        CreatePolyphony.LOGGER.info("Async loading soundfont {}...", fileName);
+        activeLoadTask = loadExecutor.submit(() -> {
+            try {
+                synth.loadSoundFont(target.toFile(), loadProgressPercent::set);
+                Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, true, null));
+            } catch (IOException ex) {
+                Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, ex));
+            } catch (Throwable t) {
+                Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, t));
+            }
+        });
+        return true;
+    }
+
+    /** Cancel any pending async load and force the selection back to None. */
+    public boolean cancelLoadToNone() {
+        if (closed) return false;
+        cancelActiveLoadTask();
+        loadGeneration.incrementAndGet();
+        loading = false;
+        pendingName = null;
+        loadProgressPercent.set(0);
+        PolyphonyClientNoteHandler.panic();
+        if (synth != null) synth.unloadSoundFont();
+        activeName = null;
+        persistSelection();
+        notifyListeners();
+        CreatePolyphony.LOGGER.info("SoundFont selection cleared (None)");
+        return true;
+    }
+
+    private void cancelActiveLoadTask() {
+        Future<?> task = activeLoadTask;
+        activeLoadTask = null;
+        if (task != null) {
+            task.cancel(true);
         }
     }
 
-    /** Force a directory rescan and notify listeners. Cheap (just a directory listing). */
+    private void completeAsyncLoad(int generation, String fileName, boolean success, @Nullable Throwable error) {
+        if (closed || generation != loadGeneration.get()) {
+            return;
+        }
+        activeLoadTask = null;
+        if (success) {
+            sessionLoadFailures.remove(fileName);
+            activeName = fileName;
+            persistSelection();
+            CreatePolyphony.LOGGER.info("Activated soundfont {}", fileName);
+        } else {
+            sessionLoadFailures.add(fileName);
+            activeName = null;
+            if (error != null) {
+                CreatePolyphony.LOGGER.error("Failed to load soundfont {}", directory.resolve(fileName), error);
+            }
+            reportLoadFailureToUser(fileName, error);
+        }
+        loading = false;
+        pendingName = null;
+        loadProgressPercent.set(0);
+        notifyListeners();
+    }
+
+    private void reportLoadFailureToUser(String fileName, @Nullable Throwable error) {
+        Minecraft mc = Minecraft.getInstance();
+        Component reason = describeError(error);
+        Component title = Component.translatable("toast.createpolyphony.soundfont.load_failed.title");
+        Component body = Component.translatable("toast.createpolyphony.soundfont.load_failed.body", fileName, reason);
+        SystemToast.add(mc.getToasts(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+        if (mc.player != null) {
+            mc.player.displayClientMessage(
+                Component.translatable("message.createpolyphony.soundfont.load_failed_chat", fileName, reason),
+                false);
+        }
+    }
+
+    private static Component describeError(@Nullable Throwable error) {
+        if (error == null) {
+            return Component.translatable("message.createpolyphony.soundfont.error.unknown");
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return Component.literal(error.getClass().getSimpleName());
+        }
+        return Component.literal(message);
+    }
+
     public void rescan() {
         rescanInternal();
         notifyListeners();
@@ -363,8 +493,11 @@ public final class SoundFontManager {
     public synchronized void close() {
         if (closed) return;
         closed = true;
+        loadGeneration.incrementAndGet();
+        cancelActiveLoadTask();
         try { watchService.close(); } catch (IOException ignored) { }
         try { watchThread.interrupt(); } catch (Throwable ignored) { }
+        try { loadExecutor.shutdownNow(); } catch (Throwable ignored) { }
         if (synth != null) {
             try { synth.close(); } catch (Throwable ignored) { }
         }

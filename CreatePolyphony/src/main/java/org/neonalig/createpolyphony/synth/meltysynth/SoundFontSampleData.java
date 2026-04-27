@@ -2,12 +2,15 @@ package org.neonalig.createpolyphony.synth.meltysynth;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.function.IntConsumer;
 
 final class SoundFontSampleData {
     private final int bitsPerSample;
     private final short[] samples;
 
-    SoundFontSampleData(RandomAccessFile reader) throws IOException {
+    private static final int READ_CHUNK_BYTES = 65_536;
+
+    SoundFontSampleData(RandomAccessFile reader, IntConsumer progressCallback) throws IOException {
         String chunkId = BinaryReaderEx.readFourCC(reader);
         if (!"LIST".equals(chunkId)) {
             throw new IOException("The LIST chunk was not found.");
@@ -27,9 +30,28 @@ final class SoundFontSampleData {
             switch (id) {
                 case "smpl" -> {
                     localBitsPerSample = 16;
-                    localSamples = new short[size / 2];
-                    for (int i = 0; i < localSamples.length; i++) {
-                        localSamples[i] = (short) BinaryReaderEx.readInt16LE(reader);
+                    int sampleCount = size / 2;
+                    localSamples = new short[sampleCount];
+                    // Bulk-read in large chunks: avoids millions of per-byte RandomAccessFile calls
+                    // and enables genuine byte-level progress reporting.
+                    byte[] buf = new byte[READ_CHUNK_BYTES];
+                    int written = 0;
+                    int remaining = size;
+                    while (remaining > 0) {
+                        int toRead = Math.min(READ_CHUNK_BYTES, remaining);
+                        if ((toRead & 1) != 0) toRead--;           // keep read frame-aligned to shorts
+                        if (toRead <= 0) break;
+                        reader.readFully(buf, 0, toRead);
+                        remaining -= toRead;
+                        int count = toRead >> 1;                    // toRead / 2
+                        for (int s = 0; s < count; s++) {
+                            int b0 = buf[s * 2]     & 0xFF;
+                            int b1 = buf[s * 2 + 1] & 0xFF;
+                            localSamples[written++] = (short) (b0 | (b1 << 8));
+                        }
+                        if (progressCallback != null && sampleCount > 0) {
+                            progressCallback.accept((int) (100L * written / sampleCount));
+                        }
                     }
                 }
                 case "sm24" -> reader.seek(reader.getFilePointer() + size);

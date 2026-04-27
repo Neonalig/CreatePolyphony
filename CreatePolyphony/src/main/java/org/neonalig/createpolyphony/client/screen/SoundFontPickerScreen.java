@@ -21,12 +21,18 @@ public final class SoundFontPickerScreen extends Screen {
 
     private static final Component TITLE = Component.translatable("screen.createpolyphony.soundfont.title");
     private static final Component NONE_LABEL = Component.translatable("screen.createpolyphony.soundfont.none");
+    private static final Component LOADING_LABEL = Component.translatable("screen.createpolyphony.soundfont.loading");
+    private static final String WARNING_PREFIX = "[!] ";
 
     private final SoundFontManager manager;
     private final Consumer<SoundFontManager> managerListener;
 
     private SoundFontList list;
     private Button setActiveButton;
+    private Button openFolderButton;
+    private Button refreshButton;
+    private Button panicButton;
+    private Button cancelLoadButton;
 
     public SoundFontPickerScreen(SoundFontManager manager) {
         super(TITLE);
@@ -44,8 +50,8 @@ public final class SoundFontPickerScreen extends Screen {
 
         int buttonY = this.height - 28;
         int pad = 6;
-        int buttonW = 84;
-        int totalW = buttonW * 4 + pad * 3;
+        int buttonW = 72;
+        int totalW = buttonW * 5 + pad * 4;
         int startX = (this.width - totalW) / 2;
 
         this.setActiveButton = this.addRenderableWidget(Button.builder(
@@ -54,22 +60,28 @@ public final class SoundFontPickerScreen extends Screen {
             .bounds(startX, buttonY, buttonW, 20)
             .build());
 
-        this.addRenderableWidget(Button.builder(
+        this.openFolderButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("screen.createpolyphony.soundfont.open_folder"),
                 b -> Util.getPlatform().openUri(manager.directory().toUri()))
             .bounds(startX + buttonW + pad, buttonY, buttonW, 20)
             .build());
 
-        this.addRenderableWidget(Button.builder(
+        this.refreshButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("screen.createpolyphony.soundfont.refresh"),
                 b -> manager.rescan())
             .bounds(startX + (buttonW + pad) * 2, buttonY, buttonW, 20)
             .build());
 
-        this.addRenderableWidget(Button.builder(
+        this.panicButton = this.addRenderableWidget(Button.builder(
                 Component.translatable("screen.createpolyphony.soundfont.panic"),
                 b -> PolyphonyClientNoteHandler.panic())
             .bounds(startX + (buttonW + pad) * 3, buttonY, buttonW, 20)
+            .build());
+
+        this.cancelLoadButton = this.addRenderableWidget(Button.builder(
+                Component.translatable("screen.createpolyphony.soundfont.cancel"),
+                b -> manager.cancelLoadToNone())
+            .bounds(startX + (buttonW + pad) * 4, buttonY, buttonW, 20)
             .build());
 
         manager.addListener(managerListener);
@@ -95,6 +107,15 @@ public final class SoundFontPickerScreen extends Screen {
             }
         }
         if (toSelect == null) {
+            String pending = manager.pending();
+            for (SoundFontList.Entry entry : list.children()) {
+                if (Objects.equals(entry.fileName, pending)) {
+                    toSelect = entry;
+                    break;
+                }
+            }
+        }
+        if (toSelect == null) {
             String active = manager.active();
             for (SoundFontList.Entry entry : list.children()) {
                 if (Objects.equals(entry.fileName, active)) {
@@ -107,7 +128,17 @@ public final class SoundFontPickerScreen extends Screen {
             toSelect = list.children().get(0);
         }
         list.setSelected(toSelect);
-        setActiveButton.active = toSelect != null;
+        updateControlState();
+    }
+
+    private void updateControlState() {
+        boolean loading = manager.isLoading();
+        boolean hasSelection = list != null && list.getSelected() != null;
+        setActiveButton.active = !loading && hasSelection;
+        openFolderButton.active = !loading;
+        refreshButton.active = !loading;
+        panicButton.active = !loading;
+        cancelLoadButton.active = loading;
     }
 
     private void onSetActive() {
@@ -124,6 +155,21 @@ public final class SoundFontPickerScreen extends Screen {
         }
 
         guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
+        if (manager.isLoading()) {
+            String pending = manager.pending();
+            Component loadingText = pending == null
+                ? LOADING_LABEL
+                : Component.translatable("screen.createpolyphony.soundfont.loading_name", pending);
+            guiGraphics.drawCenteredString(this.font, loadingText, this.width / 2, 24, 0xFFE37C);
+
+            int barW = Math.min(240, this.width - 40);
+            int barH = 8;
+            int barX = (this.width - barW) / 2;
+            int barY = 24 + this.font.lineHeight + 4;
+            guiGraphics.fill(barX, barY, barX + barW, barY + barH, 0xFF2A2A2A);
+            int fill = Math.max(1, Math.min(barW, Math.round(barW * manager.loadingProgress01())));
+            guiGraphics.fill(barX + 1, barY + 1, barX + fill - 1, barY + barH - 1, 0xFF7CFF7C);
+        }
         guiGraphics.drawString(this.font,
             Component.translatable("screen.createpolyphony.soundfont.folder", manager.directory().toAbsolutePath().toString()),
             10,
@@ -162,7 +208,7 @@ public final class SoundFontPickerScreen extends Screen {
         @Override
         public void setSelected(@Nullable SoundFontList.Entry entry) {
             super.setSelected(entry);
-            setActiveButton.active = entry != null;
+            updateControlState();
         }
 
         private final class Entry extends ObjectSelectionList.Entry<SoundFontList.Entry> {
@@ -186,13 +232,24 @@ public final class SoundFontPickerScreen extends Screen {
                                float partialTick) {
                 String active = manager.active();
                 boolean isActive = Objects.equals(fileName, active);
+                String pending = manager.pending();
+                boolean isPending = manager.isLoading() && Objects.equals(fileName, pending);
+                boolean hasWarning = manager.hasSessionLoadFailure(fileName);
                 Component text = fileName == null ? NONE_LABEL : Component.literal(fileName);
-                int color = isActive ? 0x7CFF7C : 0xFFFFFF;
-                guiGraphics.drawString(SoundFontPickerScreen.this.font, text, left + 6, top + 6, color, false);
+                int color = isActive ? 0x7CFF7C : (isPending ? 0xFFE37C : (hasWarning ? 0xFFD37C : 0xFFFFFF));
+                int x = left + 6;
+                if (hasWarning) {
+                    guiGraphics.drawString(SoundFontPickerScreen.this.font, WARNING_PREFIX, x, top + 6, 0xFFE37C, false);
+                    x += SoundFontPickerScreen.this.font.width(WARNING_PREFIX);
+                }
+                guiGraphics.drawString(SoundFontPickerScreen.this.font, text, x, top + 6, color, false);
             }
 
             @Override
             public boolean mouseClicked(double mouseX, double mouseY, int button) {
+                if (manager.isLoading()) {
+                    return false;
+                }
                 if (button == 0) {
                     SoundFontList.this.setSelected(this);
                     return true;
@@ -202,7 +259,11 @@ public final class SoundFontPickerScreen extends Screen {
 
             @Override
             public Component getNarration() {
-                return fileName == null ? NONE_LABEL : Component.literal(fileName);
+                if (fileName == null) return NONE_LABEL;
+                if (manager.hasSessionLoadFailure(fileName)) {
+                    return Component.translatable("screen.createpolyphony.soundfont.warning_narration", fileName);
+                }
+                return Component.literal(fileName);
             }
         }
     }
