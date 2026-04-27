@@ -25,11 +25,10 @@ public final class MeltySynthEngine {
 
     private final MidiEventQueue midiQueue = new MidiEventQueue(8192);
     private final int[] midiEventScratch = new int[4];
-    private final Object stateLock = new Object();
 
-    private MeltySoundFont soundFont;
-    private Synthesizer synthesizer;
-    private boolean soundFontLoaded;
+    private volatile MeltySoundFont soundFont;
+    private volatile Synthesizer synthesizer;
+    private volatile boolean soundFontLoaded;
     private volatile boolean closed;
 
     public MeltySynthEngine(SynthSettings settings) {
@@ -41,24 +40,21 @@ public final class MeltySynthEngine {
     }
 
     public void loadSoundFont(MeltySoundFont soundFont) {
-        synchronized (stateLock) {
-            this.soundFont = soundFont;
-            SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
-            synthSettings.blockSize(Math.max(8, Math.min(1024, settings.pumpChunkBytes() / Math.max(1, settings.frameSize()))));
-            synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
-            synthSettings.enableReverbAndChorus(true);
-            this.synthesizer = new Synthesizer(soundFont.soundFont(), synthSettings);
-            this.soundFontLoaded = true;
-        }
+        SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
+        synthSettings.blockSize(Math.max(8, Math.min(1024, settings.pumpChunkBytes() / Math.max(1, settings.frameSize()))));
+        synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
+        synthSettings.enableReverbAndChorus(true);
+        Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
+        this.soundFont = soundFont;
+        this.synthesizer = newSynth;
+        this.soundFontLoaded = true;
         allNotesOff();
     }
 
     public void unloadSoundFont() {
-        synchronized (stateLock) {
-            this.soundFont = null;
-            this.synthesizer = null;
-            this.soundFontLoaded = false;
-        }
+        this.soundFont = null;
+        this.synthesizer = null;
+        this.soundFontLoaded = false;
         allNotesOff();
     }
 
@@ -114,12 +110,10 @@ public final class MeltySynthEngine {
 
     public void close() {
         closed = true;
+        synthesizer = null;
+        soundFont = null;
+        soundFontLoaded = false;
         midiQueue.clear();
-        synchronized (stateLock) {
-            synthesizer = null;
-            soundFont = null;
-            soundFontLoaded = false;
-        }
     }
 
     /**
@@ -139,16 +133,15 @@ public final class MeltySynthEngine {
         }
 
         int frames = frameBytes / frameSize;
+        Synthesizer current = synthesizer;
+        drainMidi(current);
+
         float[] left = null;
         float[] right = null;
-        synchronized (stateLock) {
-            Synthesizer current = synthesizer;
-            drainMidi(current);
-            if (soundFontLoaded && current != null && current.activeVoiceCount() > 0) {
-                left = new float[frames];
-                right = new float[frames];
-                current.render(left, right, 0, frames);
-            }
+        if (soundFontLoaded && current != null && current.activeVoiceCount() > 0) {
+            left = new float[frames];
+            right = new float[frames];
+            current.render(left, right, 0, frames);
         }
         if (left == null) {
             Arrays.fill(out, offset, offset + frameBytes, (byte) 0);

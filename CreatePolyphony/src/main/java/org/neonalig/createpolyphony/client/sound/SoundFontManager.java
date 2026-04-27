@@ -216,6 +216,7 @@ public final class SoundFontManager {
     public boolean setActive(@Nullable String fileName) {
         if (fileName == null) {
             // "None" - retire any currently-loaded patches and stop playing voices.
+            PolyphonyClientNoteHandler.panic();
             if (synth != null) synth.unloadSoundFont();
             activeName = null;
             persistSelection();
@@ -234,8 +235,13 @@ public final class SoundFontManager {
             CreatePolyphony.LOGGER.warn("Soundfont not found or not an .sf2: {}", target);
             return false;
         }
+        if (Objects.equals(activeName, fileName)) {
+            return true;
+        }
         try {
             if (synth != null) {
+                // Force-stop current output before swap to avoid transitional hangs on busy trackers.
+                PolyphonyClientNoteHandler.panic();
                 synth.loadSoundFont(target.toFile());
             } else {
                 CreatePolyphony.LOGGER.warn(
