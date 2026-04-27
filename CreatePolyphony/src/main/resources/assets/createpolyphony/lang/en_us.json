@@ -33,6 +33,7 @@
   "message.createpolyphony.unlinked": "Unlinked from Tracker Bar",
   "command.createpolyphony.unlink.success": "Unlinked your current instrument.",
   "command.createpolyphony.unlink.failed": "Your current held item is not a linked instrument.",
+  "command.createpolyphony.panic.success": "Panic broadcast sent to %s linked players.",
 
   "screen.createpolyphony.soundfont.title": "SoundFont Settings",
   "screen.createpolyphony.soundfont.none": "None / No Sound",
