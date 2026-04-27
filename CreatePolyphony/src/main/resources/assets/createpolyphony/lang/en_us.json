@@ -24,8 +24,16 @@
 
   "tooltip.createpolyphony.instrument.hint": "Right-click a Tracker Bar to link",
   "tooltip.createpolyphony.instrument.hint.unlink": "Right-click the Tracker Bar again to unlink",
+  "tooltip.createpolyphony.instrument.soundfont_menu": "Shift + Right-click to open SoundFont settings",
   "tooltip.createpolyphony.linked": "Linked to Tracker Bar at %s",
 
   "message.createpolyphony.linked": "Linked to Tracker Bar - notes for %s will route to your %s",
-  "message.createpolyphony.unlinked": "Unlinked from Tracker Bar"
+  "message.createpolyphony.unlinked": "Unlinked from Tracker Bar",
+
+  "screen.createpolyphony.soundfont.title": "SoundFont Settings",
+  "screen.createpolyphony.soundfont.none": "None / No Sound",
+  "screen.createpolyphony.soundfont.set_active": "Set Active",
+  "screen.createpolyphony.soundfont.open_folder": "Open Folder",
+  "screen.createpolyphony.soundfont.refresh": "Refresh",
+  "screen.createpolyphony.soundfont.folder": "Folder: %s"
 }

@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.Nullable;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
@@ -134,7 +135,8 @@ public final class SoundFontManager {
         try {
             Path dir = resolveSoundFontDir();
             Files.createDirectories(dir);
-            PolyphonySynthesizer synth = new PolyphonySynthesizer(SynthSettings.defaults());
+            SynthSettings settings = Config.synthSettings();
+            PolyphonySynthesizer synth = new PolyphonySynthesizer(settings);
             SoundFontManager mgr = new SoundFontManager(dir, synth);
 
             // Wire the note handler to query us for the synth.

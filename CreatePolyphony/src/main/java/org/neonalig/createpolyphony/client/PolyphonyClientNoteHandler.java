@@ -15,8 +15,7 @@ import java.util.Arrays;
  *
  * <h2>Architecture (post-synth refactor)</h2>
  * <p>Previously this class translated each incoming MIDI event into a
- * <em>per-note</em> {@code PolyphonyNoteSoundInstance} backed by a
- * pitch-shifted .ogg sample from a resource pack. Now it forwards
+ * per-note sound effect from a resource pack. Now it forwards
  * incoming events directly to a long-lived
  * {@link PolyphonySynthesizer} which renders PCM in real time, and
  * keeps a single {@link PolyphonySynthSoundInstance} alive to pipe that

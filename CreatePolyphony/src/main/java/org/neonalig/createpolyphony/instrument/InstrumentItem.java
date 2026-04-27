@@ -51,6 +51,8 @@ public class InstrumentItem extends Item {
             ? "tooltip.createpolyphony.instrument.hint"
             : "tooltip.createpolyphony.instrument.hint.unlink";
         tooltip.add(Component.translatable(hintKey).withStyle(net.minecraft.ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("tooltip.createpolyphony.instrument.soundfont_menu")
+            .withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
 
         if (target != null) {
             tooltip.add(Component.translatable("tooltip.createpolyphony.linked", target.coords())

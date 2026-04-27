@@ -9,7 +9,6 @@ import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.neonalig.createpolyphony.registry.CPCreativeTabs;
 import org.neonalig.createpolyphony.registry.CPItems;
 import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
-import org.neonalig.createpolyphony.registry.CPSounds;
 import org.slf4j.Logger;
 
 /**
@@ -36,7 +35,6 @@ public final class CreatePolyphony {
         // Register deferred-register holders to the mod event bus so the
         // game knows about our items and creative tab.
         CPItems.register(modEventBus);
-        CPSounds.register(modEventBus);
         CPCreativeTabs.register(modEventBus);
         CPRecipeSerializers.register(modEventBus);
 
