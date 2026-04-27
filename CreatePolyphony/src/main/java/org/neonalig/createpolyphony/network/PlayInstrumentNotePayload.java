@@ -1,7 +1,6 @@
 package org.neonalig.createpolyphony.network;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
@@ -22,47 +21,70 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  * timbre follows the linked instrument rather than the tracker's original
  * channel program. Channel 10 (index 9) remains reserved for drums.</p>
  *
- * @param program  General-MIDI program number, 0-127. Maps to sound id
- *                 {@code instruments.<NNN>.<octave>} (NNN is 1-indexed,
- *                 zero-padded to 3 digits).
- * @param channel  the MIDI channel (0-15) the note belongs to. The client uses
- *                 this together with the note number to maintain its own
- *                 active-note table for note-off matching / cleanup.
- * @param command  MIDI command nibble: 0x80 = NoteOff, 0x90 = NoteOn.
- * @param note     MIDI note number, 0-127.
- * @param velocity MIDI velocity, 0-127. Note: a NoteOn with velocity 0 is
- *                 by convention equivalent to NoteOff.
+ * <h2>Positional audio</h2>
+ * <p>When {@code selfPlay} is {@code false} the note originates from a
+ * non-player holder (mob / deployer / contraption). The client positions the
+ * synthesiser stream at the world coordinates {@code (srcX, srcY, srcZ)} so
+ * the sound is spatially rendered at the correct location with OpenAL
+ * attenuation and panning. When {@code selfPlay} is {@code true} the player
+ * is the holder themselves; the stream stays anchored to the listener for
+ * an "in your hands" feel, and the src fields are ignored.</p>
+ *
+ * @param program   General-MIDI program number, 0-127.
+ * @param channel   MIDI channel (0-15).
+ * @param command   MIDI command nibble: 0x80 = NoteOff, 0x90 = NoteOn, 0xF0 = Panic.
+ * @param note      MIDI note number, 0-127.
+ * @param velocity  MIDI velocity, 0-127.
+ * @param selfPlay  {@code true} when the receiving player is the holder themselves
+ *                  (sound plays relative to listener); {@code false} for external sources.
+ * @param srcX      World X of the sound source (only meaningful when {@code selfPlay=false}).
+ * @param srcY      World Y of the sound source.
+ * @param srcZ      World Z of the sound source.
+ * @param maxDistanceBlocks  Server-computed audible radius in blocks (derived from simulation distance).
  */
 public record PlayInstrumentNotePayload(
     int program,
     int channel,
     int command,
     int note,
-    int velocity
+    int velocity,
+    boolean selfPlay,
+    float srcX,
+    float srcY,
+    float srcZ,
+    int maxDistanceBlocks
 ) implements CustomPacketPayload {
 
     public static final Type<PlayInstrumentNotePayload> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath(CreatePolyphony.MODID, "play_instrument_note")
     );
 
-    /**
-     * Compact StreamCodec: 5 bytes on the wire (program/channel/command/note/velocity).
-     * Channel is masked to 4 bits, command to its high nibble, note/velocity/program
-     * to 7 bits each (MIDI's natural range).
-     */
+    /** Manual StreamCodec: 5 MIDI bytes + 1 boolean + 3 floats + 1 int. */
     public static final StreamCodec<RegistryFriendlyByteBuf, PlayInstrumentNotePayload> STREAM_CODEC =
-        StreamCodec.composite(
-            ByteBufCodecs.BYTE, p -> (byte) p.program,
-            ByteBufCodecs.BYTE, p -> (byte) p.channel,
-            ByteBufCodecs.BYTE, p -> (byte) p.command,
-            ByteBufCodecs.BYTE, p -> (byte) p.note,
-            ByteBufCodecs.BYTE, p -> (byte) p.velocity,
-            (prog, ch, cmd, n, v) -> new PlayInstrumentNotePayload(
-                Byte.toUnsignedInt(prog) & 0x7F,
-                Byte.toUnsignedInt(ch)   & 0x0F,
-                Byte.toUnsignedInt(cmd)  & 0xF0,
-                Byte.toUnsignedInt(n)    & 0x7F,
-                Byte.toUnsignedInt(v)    & 0x7F
+        StreamCodec.of(
+            (buf, p) -> {
+                buf.writeByte(p.program());
+                buf.writeByte(p.channel());
+                buf.writeByte(p.command());
+                buf.writeByte(p.note());
+                buf.writeByte(p.velocity());
+                buf.writeBoolean(p.selfPlay());
+                buf.writeFloat(p.srcX());
+                buf.writeFloat(p.srcY());
+                buf.writeFloat(p.srcZ());
+                buf.writeVarInt(p.maxDistanceBlocks());
+            },
+            buf -> new PlayInstrumentNotePayload(
+                Byte.toUnsignedInt(buf.readByte()) & 0x7F,
+                Byte.toUnsignedInt(buf.readByte()) & 0x0F,
+                Byte.toUnsignedInt(buf.readByte()) & 0xF0,
+                Byte.toUnsignedInt(buf.readByte()) & 0x7F,
+                Byte.toUnsignedInt(buf.readByte()) & 0x7F,
+                buf.readBoolean(),
+                buf.readFloat(),
+                buf.readFloat(),
+                buf.readFloat(),
+                buf.readVarInt()
             )
         );
 

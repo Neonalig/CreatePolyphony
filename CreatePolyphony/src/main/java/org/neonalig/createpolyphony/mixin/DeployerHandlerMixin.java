@@ -51,7 +51,8 @@ public abstract class DeployerHandlerMixin {
             level,
             holderId,
             fakePlayer.getMainHandItem(),
-            targetPos
+            targetPos,
+            center
         );
     }
 }

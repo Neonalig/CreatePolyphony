@@ -64,6 +64,11 @@ public final class PolyphonyClientNoteHandler {
     /** The single sound instance carrying our synth's PCM into OpenAL. */
     private static PolyphonySynthSoundInstance activeStream = null;
 
+    /** Most-recently received source-position state from the server. */
+    private static float lastSrcX = 0f, lastSrcY = 0f, lastSrcZ = 0f;
+    private static boolean lastSelfPlay = true;
+    private static int lastMaxDistanceBlocks = 16 * 10;
+
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
     private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
 
@@ -98,6 +103,18 @@ public final class PolyphonyClientNoteHandler {
             return;
         }
 
+        // Only NoteOn packets are authoritative for source position. NoteOff/control
+        // packets should not re-anchor the stream and cause audible source snapping.
+        if (payload.isNoteOn()) {
+            lastSelfPlay = payload.selfPlay();
+            if (!lastSelfPlay) {
+                lastSrcX = payload.srcX();
+                lastSrcY = payload.srcY();
+                lastSrcZ = payload.srcZ();
+            }
+        }
+        lastMaxDistanceBlocks = Math.max(16, payload.maxDistanceBlocks());
+
         ensureStream(synth);
         debugNote("recv", payload);
 
@@ -129,9 +146,18 @@ public final class PolyphonyClientNoteHandler {
      */
     private static void ensureStream(PolyphonySynthesizer synth) {
         if (activeStream != null && !activeStream.isStopped()) {
+            if (activeStream.maxDistanceBlocks() != lastMaxDistanceBlocks) {
+                debugStream("restart:distance-changed");
+                activeStream.stopInstance();
+                activeStream = null;
+            }
+        }
+        if (activeStream != null && !activeStream.isStopped()) {
             // Keep handler state aligned with the real SoundEngine channel state.
             // If OpenAL/SoundEngine dropped the channel, recreate on next packet.
             if (Minecraft.getInstance().getSoundManager().isActive(activeStream)) {
+                // Refresh source position on the running stream every packet.
+                activeStream.setSourcePosition(lastSrcX, lastSrcY, lastSrcZ, lastSelfPlay);
                 return;
             }
             debugStream("restart:inactive");
@@ -139,7 +165,8 @@ public final class PolyphonyClientNoteHandler {
         }
         // Either we never started one, or the previous stream got stopped
         // (synth swap, world change). Start a fresh instance.
-        activeStream = new PolyphonySynthSoundInstance(synth);
+        activeStream = new PolyphonySynthSoundInstance(synth, lastMaxDistanceBlocks);
+        activeStream.setSourcePosition(lastSrcX, lastSrcY, lastSrcZ, lastSelfPlay);
         debugStream("start");
         Minecraft.getInstance().getSoundManager().play(activeStream);
     }
@@ -151,6 +178,8 @@ public final class PolyphonyClientNoteHandler {
      */
     public static void stopAll() {
         Arrays.fill(lastProgram, -1);
+        lastSrcX = 0f; lastSrcY = 0f; lastSrcZ = 0f; lastSelfPlay = true;
+        lastMaxDistanceBlocks = 16 * 10;
         PolyphonySynthesizer synth = currentSynth();
         if (synth != null) {
             try { synth.allNotesOff(); } catch (Throwable t) {

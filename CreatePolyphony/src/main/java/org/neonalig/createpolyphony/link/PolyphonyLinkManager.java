@@ -13,6 +13,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import com.simibubi.create.content.logistics.depot.DepotBlockEntity;
 import org.neonalig.createpolyphony.Config;
@@ -68,6 +69,8 @@ public final class PolyphonyLinkManager {
 
     /** Limited debug breadcrumbs for note-routing diagnosis without log spam. */
     private static final AtomicInteger NOTE_ROUTE_DEBUG_BUDGET = new AtomicInteger(64);
+    /** Throttled warnings when a non-player holder has no resolvable world position. */
+    private static final AtomicInteger MISSING_HOLDER_POS_WARN_BUDGET = new AtomicInteger(32);
 
     /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
     private static final Map<UUID, Map<LinkKey, HeldInstruments>> ACTIVE_HAND_LINKS = new HashMap<>();
@@ -78,7 +81,7 @@ public final class PolyphonyLinkManager {
     /** Expiration state for transient automation holders (deployer interactions, depot/ground stack targets). */
     private static final Map<UUID, TransientHolderState> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
 
-    private record TransientHolderState(ServerLevel level, long expiryTick) {}
+    private record TransientHolderState(ServerLevel level, long expiryTick, @Nullable Vec3 holderPos) {}
     /** Snapshot of currently synced mob holders per level for cheap stale-holder cleanup. */
     private static final Map<String, Set<UUID>> ACTIVE_MOB_HOLDERS_BY_LEVEL = new HashMap<>();
 
@@ -158,7 +161,8 @@ public final class PolyphonyLinkManager {
     /** Send all-notes-off to a player and clear their note-ownership entries (used on dimension change). */
     public static void onPlayerChangedDimension(ServerPlayer player) {
         // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
-        PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0));
+        PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
+            simulationDistanceBlocks(player.getServer())));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         UUID id = player.getUUID();
         ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
@@ -172,7 +176,8 @@ public final class PolyphonyLinkManager {
     public static void registerAutomationActivation(ServerLevel level,
                                                     UUID holderId,
                                                     @Nullable ItemStack deployerHeld,
-                                                    @Nullable BlockPos targetPos) {
+                                                    @Nullable BlockPos targetPos,
+                                                    @Nullable Vec3 deployerPos) {
         if (holderId == null) return;
 
         Map<LinkKey, HeldInstruments> desired = new HashMap<>();
@@ -193,7 +198,10 @@ public final class PolyphonyLinkManager {
 
         if (desired.isEmpty()) return;
         syncHolderLinks(holderId, desired, level);
-        TRANSIENT_HOLDER_EXPIRY.put(holderId, new TransientHolderState(level, currentServerTick(level.getServer()) + AUTOMATION_HOLDER_TTL_TICKS));
+        Vec3 holderPosSnap = deployerPos != null
+            ? deployerPos
+            : (targetPos != null ? Vec3.atCenterOf(targetPos) : null);
+        TRANSIENT_HOLDER_EXPIRY.put(holderId, new TransientHolderState(level, currentServerTick(level.getServer()) + AUTOMATION_HOLDER_TTL_TICKS, holderPosSnap));
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -239,7 +247,8 @@ public final class PolyphonyLinkManager {
         if (noteOff) {
             UUID recordedOwner = consumeTrackedOwner(key, new ActiveNoteKey(channel, note));
             if (recordedOwner != null) {
-                if (sendNotePacket(level, recordedOwner, 0, channel, 0x80, note, velocity)) {
+                Vec3 recordedOwnerPos = resolveHolderPosition(level, recordedOwner);
+                if (sendNotePacket(level, pos, recordedOwnerPos, recordedOwner, 0, channel, 0x80, note, velocity)) {
                     debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
                 } else {
                     debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
@@ -324,11 +333,13 @@ public final class PolyphonyLinkManager {
             program = (channel == 9) ? 127 : family.canonicalGmProgram();
         }
 
-        if (sendNotePacket(level, assigneePlayerId, program, channel, command, note, velocity)) {
+        Vec3 holderPos = resolveHolderPosition(level, assigneePlayerId);
+        if (sendNotePacket(level, pos, holderPos, assigneePlayerId, program, channel, command, note, velocity)) {
             if (!noteOff) {
                 UUID previousOwner = trackNoteOwner(key, activeNoteKey, assigneePlayerId);
                 if (previousOwner != null && !Objects.equals(previousOwner, assigneePlayerId)) {
-                    sendNotePacket(level, previousOwner, 0, channel, 0x80, note, 0);
+                    Vec3 previousOwnerPos = resolveHolderPosition(level, previousOwner);
+                    sendNotePacket(level, pos, previousOwnerPos, previousOwner, 0, channel, 0x80, note, 0);
                     debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
                 }
             }
@@ -343,20 +354,119 @@ public final class PolyphonyLinkManager {
         removeHolder(player.getUUID(), slFrom(player));
     }
 
-    private static boolean sendNotePacket(ServerLevel level, UUID holderId, int program, int channel, int command, int note, int velocity) {
-        PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(program, channel, command, note, velocity);
-        ServerPlayer directPlayer = level.getServer().getPlayerList().getPlayer(holderId);
+    /**
+     * Sends a MIDI note packet to the appropriate recipients with dimension and
+     * distance checks.
+     *
+     * <p><b>NoteOn</b> events are gated by:
+     * <ol>
+     *   <li>Same dimension as the tracker level (dimension guards prevent
+     *       cross-dimension audio bleeding).</li>
+     *   <li>Position within the server simulation distance radius of the
+     *       tracker block position.</li>
+     * </ol>
+     * <b>NoteOff / stop events</b> always go through without range checks so
+     * in-flight notes are never left stuck.</p>
+     *
+     * @param trackerLevel the level the tracker block lives in.
+     * @param trackerPos   the tracker block position (used for distance checks).
+     * @param holderPos    world position of the holder (mob / deployer).
+     * @param holderId     UUID of the channel assignee (player UUID or non-player pseudo-UUID).
+     */
+    private static boolean sendNotePacket(ServerLevel trackerLevel, BlockPos trackerPos,
+                                          @Nullable Vec3 holderPos, UUID holderId,
+                                          int program, int channel, int command, int note, int velocity) {
+        boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
+        int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
+        double maxDist = maxDistanceBlocksInt;
+        double maxDistSq = maxDist * maxDist;
+
+        // ---- Direct player recipient ----
+        ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(holderId);
         if (directPlayer != null) {
-            PacketDistributor.sendToPlayer(directPlayer, payload);
+            if (isNoteOn) {
+                // Dimension check: only route NoteOn to players in the tracker's dimension.
+                if (directPlayer.level() != trackerLevel) return false;
+                // Distance check: stop delivering notes once the player wanders out of range.
+                double distSq = directPlayer.distanceToSqr(trackerPos.getX() + 0.5,
+                    trackerPos.getY() + 0.5, trackerPos.getZ() + 0.5);
+                if (distSq > maxDistSq) return false;
+            }
+            // selfPlay=true: the receiving player IS the instrument holder.
+            Vec3 pp = directPlayer.position();
+            PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
+                program, channel, command, note, velocity,
+                true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt));
             return true;
         }
 
+        // Non-player holder: if we cannot resolve a physical source position, never
+        // synthesize from tracker position. For NoteOn we drop with warning; NoteOffs
+        // are still sent (with position ignored client-side) to prevent stuck voices.
+        Vec3 srcPos = holderPos;
+        if (srcPos == null) {
+            if (isNoteOn) {
+                warnMissingHolderPosition(trackerLevel, trackerPos, holderId, channel, note);
+                return false;
+            }
+            srcPos = Vec3.ZERO;
+        }
+
+        // ---- Non-player holder: broadcast to nearby players in the same level ----
+        // level.players() already returns only players in trackerLevel, so the
+        // dimension check is implicit; we only need the distance check.
         boolean sent = false;
-        for (ServerPlayer watcher : level.players()) {
-            PacketDistributor.sendToPlayer(watcher, payload);
+        for (ServerPlayer watcher : trackerLevel.players()) {
+            if (isNoteOn) {
+                double distSq = watcher.distanceToSqr(srcPos.x, srcPos.y, srcPos.z);
+                if (distSq > maxDistSq) continue;
+            }
+            PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
+                program, channel, command, note, velocity,
+                false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt));
             sent = true;
         }
         return sent;
+    }
+
+    private static int simulationDistanceBlocks(@Nullable MinecraftServer server) {
+        if (server == null) return 16 * 10;
+        return Math.max(1, server.getPlayerList().getSimulationDistance()) * 16;
+    }
+
+    private static void warnMissingHolderPosition(ServerLevel level, BlockPos trackerPos, UUID holderId, int channel, int note) {
+        if (MISSING_HOLDER_POS_WARN_BUDGET.getAndDecrement() <= 0) return;
+        CreatePolyphony.LOGGER.warn(
+            "Dropping NoteOn: unresolved holder position. dim={} tracker={} holder={} ch={} note={}",
+            level.dimension().location(), trackerPos.toShortString(), holderId, channel & 0x0F, note & 0x7F);
+    }
+
+    /**
+     * Resolves the world position of a holder for use as the sound-source
+     * position in the outgoing packet.
+     *
+     * <p>Lookup order:
+     * <ol>
+     *   <li>Direct server player (same UUID, any dimension).</li>
+     *   <li>Entity by UUID within {@code level} (covers mobs).</li>
+     *   <li>Stored automation position from {@link #TRANSIENT_HOLDER_EXPIRY}
+     *       (covers deployer/contraption pseudo-UUIDs).</li>
+     * </ol>
+     * Returns {@code null} if none of the above applies; callers fall back to
+     * the tracker position in that case.</p>
+     */
+    @Nullable
+    private static Vec3 resolveHolderPosition(ServerLevel level, UUID holderId) {
+        // Player
+        ServerPlayer player = level.getServer().getPlayerList().getPlayer(holderId);
+        if (player != null) return player.position();
+        // Mob / living entity in the level
+        Entity entity = level.getEntity(holderId);
+        if (entity != null) return entity.position();
+        // Automation (deployer) – stored at registration time
+        TransientHolderState state = TRANSIENT_HOLDER_EXPIRY.get(holderId);
+        if (state != null && state.holderPos() != null) return state.holderPos();
+        return null;
     }
 
     private static UUID trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, UUID assignee) {
@@ -379,19 +489,11 @@ public final class PolyphonyLinkManager {
         if (byNote == null || byNote.isEmpty()) return;
 
         if (level != null) {
-            ServerPlayer directPlayer = level.getServer().getPlayerList().getPlayer(holderId);
             for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
                 if (!holderId.equals(entry.getValue())) continue;
                 ActiveNoteKey active = entry.getKey();
-                PlayInstrumentNotePayload stop = new PlayInstrumentNotePayload(0, active.channel(), 0x80, active.note(), 0);
-                if (directPlayer != null) {
-                    PacketDistributor.sendToPlayer(directPlayer, stop);
-                } else {
-                    // Non-player holder (deployer, mob): broadcast stop to all level players.
-                    for (ServerPlayer watcher : level.players()) {
-                        PacketDistributor.sendToPlayer(watcher, stop);
-                    }
-                }
+                Vec3 holderPos = resolveHolderPosition(level, holderId);
+                sendNotePacket(level, key.pos(), holderPos, holderId, 0, active.channel(), 0x80, active.note(), 0);
                 byNote.remove(active);
             }
         }

@@ -107,11 +107,14 @@ public class Config {
         return ONE_MAN_BAND_USE_ALL_GM_PROGRAMS.get();
     }
 
+
     public static SoundSource synthSoundSource() {
         return SYNTH_SOUND_SOURCE.get();
     }
 
     public static SynthSettings synthSettings() {
-        return new SynthSettings(44_100f, 2, 16, MAX_VOICES.get(), RING_BUFFER_BYTES.get(), PUMP_CHUNK_BYTES.get());
+        // OpenAL only spatializes mono sources; keep synth output mono so holder audio
+        // can pan and attenuate in world space.
+        return new SynthSettings(44_100f, 1, 16, MAX_VOICES.get(), RING_BUFFER_BYTES.get(), PUMP_CHUNK_BYTES.get());
     }
 }

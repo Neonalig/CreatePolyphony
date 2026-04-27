@@ -64,7 +64,10 @@ public final class PolyphonyServerCommands {
         for (UUID uuid : recipients) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null) continue;
-            PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0));
+            // Panic: selfPlay=true (from server), position doesn't matter for a stop-all command
+            int maxDistanceBlocks = Math.max(1, server.getPlayerList().getSimulationDistance()) * 16;
+            PacketDistributor.sendToPlayer(player,
+                new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0, 0, 0, maxDistanceBlocks));
             count++;
         }
 
