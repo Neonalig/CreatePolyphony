@@ -25,6 +25,7 @@ import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -109,8 +110,11 @@ public final class SoundFontManager {
     private final Thread watchThread;
     private final ExecutorService loadExecutor;
     private final AtomicInteger loadGeneration = new AtomicInteger();
+    @Nullable private volatile Future<?> activeLoadTask;
     private volatile boolean closed = false;
     private volatile boolean loading = false;
+    @Nullable private volatile String pendingName = null;
+    private volatile long loadStartedAtNanos = 0L;
 
     private SoundFontManager(Path directory, @Nullable PolyphonySynthesizer synth) throws IOException {
         this.directory = directory;
@@ -206,6 +210,28 @@ public final class SoundFontManager {
         return (activeName == null || loading) ? null : synth;
     }
 
+    public boolean isLoading() {
+        return loading;
+    }
+
+    @Nullable
+    public String pending() {
+        return pendingName;
+    }
+
+    /**
+     * Coarse 0..1 UI progress. Since SF2 decode is opaque, this is a smoothed
+     * time-based indicator while work is in progress.
+     */
+    public float loadingProgress01() {
+        if (!loading) return 1.0F;
+        long started = loadStartedAtNanos;
+        if (started <= 0L) return 0.05F;
+        double elapsedSec = (System.nanoTime() - started) / 1_000_000_000.0;
+        double eased = 1.0 - Math.exp(-elapsedSec / 1.8);
+        return (float) Math.max(0.05, Math.min(0.92, eased));
+    }
+
     public boolean synthesisAvailable() {
         return synth != null;
     }
@@ -229,17 +255,7 @@ public final class SoundFontManager {
     public boolean setActive(@Nullable String fileName) {
         if (closed) return false;
         if (fileName == null) {
-            // "None" - retire any currently-loaded patches and stop playing voices.
-            loadGeneration.incrementAndGet();
-            loading = true;
-            PolyphonyClientNoteHandler.panic();
-            if (synth != null) synth.unloadSoundFont();
-            activeName = null;
-            loading = false;
-            persistSelection();
-            notifyListeners();
-            CreatePolyphony.LOGGER.info("SoundFont selection cleared (None)");
-            return true;
+            return cancelLoadToNone();
         }
 
         // Don't let callers pass arbitrary paths - we only accept basenames inside our dir.
@@ -265,15 +281,18 @@ public final class SoundFontManager {
             return true;
         }
 
+        cancelActiveLoadTask();
+
         // Enter a silent transition state immediately so in-flight MIDI is dropped while loading.
         final int generation = loadGeneration.incrementAndGet();
         loading = true;
+        pendingName = fileName;
+        loadStartedAtNanos = System.nanoTime();
         activeName = null;
         PolyphonyClientNoteHandler.panic();
-        synth.unloadSoundFont();
         notifyListeners();
 
-        loadExecutor.execute(() -> {
+        activeLoadTask = loadExecutor.submit(() -> {
             try {
                 synth.loadSoundFont(target.toFile());
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, true, null));
@@ -286,10 +305,36 @@ public final class SoundFontManager {
         return true;
     }
 
+    /** Cancel any pending async load and force the selection back to None. */
+    public boolean cancelLoadToNone() {
+        if (closed) return false;
+        cancelActiveLoadTask();
+        loadGeneration.incrementAndGet();
+        loading = false;
+        pendingName = null;
+        loadStartedAtNanos = 0L;
+        PolyphonyClientNoteHandler.panic();
+        if (synth != null) synth.unloadSoundFont();
+        activeName = null;
+        persistSelection();
+        notifyListeners();
+        CreatePolyphony.LOGGER.info("SoundFont selection cleared (None)");
+        return true;
+    }
+
+    private void cancelActiveLoadTask() {
+        Future<?> task = activeLoadTask;
+        activeLoadTask = null;
+        if (task != null) {
+            task.cancel(true);
+        }
+    }
+
     private void completeAsyncLoad(int generation, String fileName, boolean success, @Nullable Throwable error) {
         if (closed || generation != loadGeneration.get()) {
             return;
         }
+        activeLoadTask = null;
         if (success) {
             activeName = fileName;
             persistSelection();
@@ -301,6 +346,8 @@ public final class SoundFontManager {
             }
         }
         loading = false;
+        pendingName = null;
+        loadStartedAtNanos = 0L;
         notifyListeners();
     }
 
@@ -410,6 +457,7 @@ public final class SoundFontManager {
         if (closed) return;
         closed = true;
         loadGeneration.incrementAndGet();
+        cancelActiveLoadTask();
         try { watchService.close(); } catch (IOException ignored) { }
         try { watchThread.interrupt(); } catch (Throwable ignored) { }
         try { loadExecutor.shutdownNow(); } catch (Throwable ignored) { }
