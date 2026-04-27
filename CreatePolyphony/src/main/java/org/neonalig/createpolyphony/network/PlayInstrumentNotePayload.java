@@ -41,6 +41,8 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  * @param srcY      World Y of the sound source.
  * @param srcZ      World Z of the sound source.
  * @param maxDistanceBlocks  Server-computed audible radius in blocks (derived from simulation distance).
+ * @param sourceMost Most-significant bits of the holder/source UUID.
+ * @param sourceLeast Least-significant bits of the holder/source UUID.
  */
 public record PlayInstrumentNotePayload(
     int program,
@@ -52,14 +54,16 @@ public record PlayInstrumentNotePayload(
     float srcX,
     float srcY,
     float srcZ,
-    int maxDistanceBlocks
+    int maxDistanceBlocks,
+    long sourceMost,
+    long sourceLeast
 ) implements CustomPacketPayload {
 
     public static final Type<PlayInstrumentNotePayload> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath(CreatePolyphony.MODID, "play_instrument_note")
     );
 
-    /** Manual StreamCodec: 5 MIDI bytes + 1 boolean + 3 floats + 1 int. */
+    /** Manual StreamCodec: 5 MIDI bytes + 1 boolean + 3 floats + 1 int + 2 longs. */
     public static final StreamCodec<RegistryFriendlyByteBuf, PlayInstrumentNotePayload> STREAM_CODEC =
         StreamCodec.of(
             (buf, p) -> {
@@ -73,6 +77,8 @@ public record PlayInstrumentNotePayload(
                 buf.writeFloat(p.srcY());
                 buf.writeFloat(p.srcZ());
                 buf.writeVarInt(p.maxDistanceBlocks());
+                buf.writeLong(p.sourceMost());
+                buf.writeLong(p.sourceLeast());
             },
             buf -> new PlayInstrumentNotePayload(
                 Byte.toUnsignedInt(buf.readByte()) & 0x7F,
@@ -84,7 +90,9 @@ public record PlayInstrumentNotePayload(
                 buf.readFloat(),
                 buf.readFloat(),
                 buf.readFloat(),
-                buf.readVarInt()
+                buf.readVarInt(),
+                buf.readLong(),
+                buf.readLong()
             )
         );
 

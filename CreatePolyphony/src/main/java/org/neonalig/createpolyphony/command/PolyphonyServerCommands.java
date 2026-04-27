@@ -67,7 +67,8 @@ public final class PolyphonyServerCommands {
             // Panic: selfPlay=true (from server), position doesn't matter for a stop-all command
             int maxDistanceBlocks = Math.max(1, server.getPlayerList().getSimulationDistance()) * 16;
             PacketDistributor.sendToPlayer(player,
-                new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0, 0, 0, maxDistanceBlocks));
+                new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0, 0, 0, maxDistanceBlocks,
+                    uuid.getMostSignificantBits(), uuid.getLeastSignificantBits()));
             count++;
         }
 

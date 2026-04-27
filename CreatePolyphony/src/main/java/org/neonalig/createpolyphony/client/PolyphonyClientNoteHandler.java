@@ -4,11 +4,16 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.neonalig.createpolyphony.CreatePolyphony;
+import org.neonalig.createpolyphony.client.sound.SoundFontManager;
 import org.neonalig.createpolyphony.client.sound.PolyphonySynthSoundInstance;
 import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -61,13 +66,12 @@ public final class PolyphonyClientNoteHandler {
      */
     private static final int[] lastProgram = new int[16];
 
-    /** The single sound instance carrying our synth's PCM into OpenAL. */
-    private static PolyphonySynthSoundInstance activeStream = null;
+    private static final int BUS_IDLE_TIMEOUT_TICKS = 20 * 12;
+    private static final int MAX_SOURCE_BUSES = 24;
 
-    /** Most-recently received source-position state from the server. */
-    private static float lastSrcX = 0f, lastSrcY = 0f, lastSrcZ = 0f;
-    private static boolean lastSelfPlay = true;
-    private static int lastMaxDistanceBlocks = 16 * 10;
+    /** One independent synth/stream per holder source UUID for positional separation. */
+    private static final Map<UUID, SourceBus> SOURCE_BUSES = new HashMap<>();
+    private static int lastSoundfontGeneration = Integer.MIN_VALUE;
 
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
     private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
@@ -95,27 +99,46 @@ public final class PolyphonyClientNoteHandler {
             return;
         }
 
-        PolyphonySynthesizer synth = currentSynth();
-        if (synth == null) {
-            // No active soundfont selected (or synth boot failed) - silently drop.
-            // The user picked "None / No Sound" or hasn't picked anything yet.
+        SoundFontManager manager = SoundFontManager.get();
+        if (manager == null || manager.active() == null || manager.isLoading()) {
             debugNote("drop:no-synth", payload);
             return;
         }
 
-        // Only NoteOn packets are authoritative for source position. NoteOff/control
-        // packets should not re-anchor the stream and cause audible source snapping.
-        if (payload.isNoteOn()) {
-            lastSelfPlay = payload.selfPlay();
-            if (!lastSelfPlay) {
-                lastSrcX = payload.srcX();
-                lastSrcY = payload.srcY();
-                lastSrcZ = payload.srcZ();
+        int generation = manager.soundfontGeneration();
+        if (generation != lastSoundfontGeneration) {
+            stopAll();
+            lastSoundfontGeneration = generation;
+        }
+
+        UUID sourceId = new UUID(payload.sourceMost(), payload.sourceLeast());
+        boolean noteOn = payload.isNoteOn();
+        SourceBus bus = SOURCE_BUSES.get(sourceId);
+        if (bus == null && !noteOn) {
+            debugNote("drop:no-bus", payload);
+            return;
+        }
+        if (bus == null) {
+            bus = createBus(manager, sourceId);
+            if (bus == null) {
+                debugNote("drop:bus-create-failed", payload);
+                return;
+            }
+            SOURCE_BUSES.put(sourceId, bus);
+        }
+
+        if (noteOn) {
+            bus.selfPlay = payload.selfPlay();
+            if (!bus.selfPlay) {
+                bus.srcX = payload.srcX();
+                bus.srcY = payload.srcY();
+                bus.srcZ = payload.srcZ();
             }
         }
-        lastMaxDistanceBlocks = Math.max(16, payload.maxDistanceBlocks());
+        bus.maxDistanceBlocks = Math.max(16, payload.maxDistanceBlocks());
+        bus.lastTouchedTick = player.tickCount;
 
-        ensureStream(synth);
+        ensureStream(bus);
         debugNote("recv", payload);
 
         int channel = payload.channel() & 0x0F;
@@ -123,19 +146,20 @@ public final class PolyphonyClientNoteHandler {
         int velocity = payload.velocity() & 0x7F;
         int program = payload.program() & 0x7F;
 
-        if (payload.isNoteOn()) {
+        if (noteOn) {
             // Program is only meaningful for NoteOn; applying it here prevents NoteOff-only
             // safety packets from altering timbre state on the channel.
-            if (lastProgram[channel] != program) {
-                synth.programChange(channel, program);
-                lastProgram[channel] = program;
+            if (bus.lastProgram[channel] != program) {
+                bus.synth.programChange(channel, program);
+                bus.lastProgram[channel] = program;
             }
-            synth.noteOn(channel, note, velocity);
+            bus.synth.noteOn(channel, note, velocity);
             debugNote("note-on", payload);
         } else if (payload.isNoteOff()) {
-            synth.noteOff(channel, note);
+            bus.synth.noteOff(channel, note);
             debugNote("note-off", payload);
         }
+        pruneIdleBuses(player.tickCount);
         // Anything else (e.g. CC, pitch-bend) would be added here once the
         // server-side packet payload grows to carry them.
     }
@@ -144,31 +168,31 @@ public final class PolyphonyClientNoteHandler {
      * Lazily start the streaming sound instance the first time we have
      * something to play. Subsequent NoteOns just feed the running synth.
      */
-    private static void ensureStream(PolyphonySynthesizer synth) {
-        if (activeStream != null && !activeStream.isStopped()) {
-            if (activeStream.maxDistanceBlocks() != lastMaxDistanceBlocks) {
+    private static void ensureStream(SourceBus bus) {
+        if (bus.stream != null && !bus.stream.isStopped()) {
+            if (bus.stream.maxDistanceBlocks() != bus.maxDistanceBlocks) {
                 debugStream("restart:distance-changed");
-                activeStream.stopInstance();
-                activeStream = null;
+                bus.stream.stopInstance();
+                bus.stream = null;
             }
         }
-        if (activeStream != null && !activeStream.isStopped()) {
+        if (bus.stream != null && !bus.stream.isStopped()) {
             // Keep handler state aligned with the real SoundEngine channel state.
             // If OpenAL/SoundEngine dropped the channel, recreate on next packet.
-            if (Minecraft.getInstance().getSoundManager().isActive(activeStream)) {
+            if (Minecraft.getInstance().getSoundManager().isActive(bus.stream)) {
                 // Refresh source position on the running stream every packet.
-                activeStream.setSourcePosition(lastSrcX, lastSrcY, lastSrcZ, lastSelfPlay);
+                bus.stream.setSourcePosition(bus.srcX, bus.srcY, bus.srcZ, bus.selfPlay);
                 return;
             }
             debugStream("restart:inactive");
-            activeStream = null;
+            bus.stream = null;
         }
         // Either we never started one, or the previous stream got stopped
         // (synth swap, world change). Start a fresh instance.
-        activeStream = new PolyphonySynthSoundInstance(synth, lastMaxDistanceBlocks);
-        activeStream.setSourcePosition(lastSrcX, lastSrcY, lastSrcZ, lastSelfPlay);
+        bus.stream = new PolyphonySynthSoundInstance(bus.synth, bus.maxDistanceBlocks);
+        bus.stream.setSourcePosition(bus.srcX, bus.srcY, bus.srcZ, bus.selfPlay);
         debugStream("start");
-        Minecraft.getInstance().getSoundManager().play(activeStream);
+        Minecraft.getInstance().getSoundManager().play(bus.stream);
     }
 
     /**
@@ -178,18 +202,41 @@ public final class PolyphonyClientNoteHandler {
      */
     public static void stopAll() {
         Arrays.fill(lastProgram, -1);
-        lastSrcX = 0f; lastSrcY = 0f; lastSrcZ = 0f; lastSelfPlay = true;
-        lastMaxDistanceBlocks = 16 * 10;
-        PolyphonySynthesizer synth = currentSynth();
-        if (synth != null) {
-            try { synth.allNotesOff(); } catch (Throwable t) {
-                CreatePolyphony.LOGGER.warn("allNotesOff failed during stopAll()", t);
+        for (SourceBus bus : SOURCE_BUSES.values()) {
+            bus.close();
+        }
+        SOURCE_BUSES.clear();
+    }
+
+    private static void pruneIdleBuses(int nowTick) {
+        if (SOURCE_BUSES.isEmpty()) return;
+        Iterator<Map.Entry<UUID, SourceBus>> it = SOURCE_BUSES.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<UUID, SourceBus> entry = it.next();
+            SourceBus bus = entry.getValue();
+            if ((nowTick - bus.lastTouchedTick) <= BUS_IDLE_TIMEOUT_TICKS) continue;
+            bus.close();
+            it.remove();
+        }
+        if (SOURCE_BUSES.size() <= MAX_SOURCE_BUSES) return;
+        SourceBus oldest = null;
+        UUID oldestId = null;
+        for (Map.Entry<UUID, SourceBus> entry : SOURCE_BUSES.entrySet()) {
+            if (oldest == null || entry.getValue().lastTouchedTick < oldest.lastTouchedTick) {
+                oldest = entry.getValue();
+                oldestId = entry.getKey();
             }
         }
-        if (activeStream != null) {
-            activeStream.stopInstance();
-            activeStream = null;
+        if (oldest != null && oldestId != null) {
+            oldest.close();
+            SOURCE_BUSES.remove(oldestId);
         }
+    }
+
+    private static SourceBus createBus(SoundFontManager manager, UUID sourceId) {
+        PolyphonySynthesizer synth = manager.createIsolatedSynth();
+        if (synth == null) return null;
+        return new SourceBus(sourceId, synth);
     }
 
     /** Emergency hard-stop for all local synth output. */
@@ -238,5 +285,34 @@ public final class PolyphonyClientNoteHandler {
     private static void debugStream(String phase) {
         if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
         CreatePolyphony.LOGGER.debug("client:stream:{}", phase);
+    }
+
+    private static final class SourceBus {
+        private final UUID sourceId;
+        private final PolyphonySynthesizer synth;
+        private final int[] lastProgram = new int[16];
+        private PolyphonySynthSoundInstance stream;
+        private float srcX, srcY, srcZ;
+        private boolean selfPlay = true;
+        private int maxDistanceBlocks = 16 * 10;
+        private int lastTouchedTick = 0;
+
+        private SourceBus(UUID sourceId, PolyphonySynthesizer synth) {
+            this.sourceId = sourceId;
+            this.synth = synth;
+            Arrays.fill(this.lastProgram, -1);
+        }
+
+        private void close() {
+            try { synth.allNotesOff(); } catch (Throwable ignored) { }
+            try { synth.close(); } catch (Throwable ignored) { }
+            if (stream != null) {
+                stream.stopInstance();
+                stream = null;
+            }
+            if (CreatePolyphony.LOGGER.isDebugEnabled()) {
+                CreatePolyphony.LOGGER.debug("client:bus:close:{}", sourceId);
+            }
+        }
     }
 }

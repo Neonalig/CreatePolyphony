@@ -161,10 +161,10 @@ public final class PolyphonyLinkManager {
     /** Send all-notes-off to a player and clear their note-ownership entries (used on dimension change). */
     public static void onPlayerChangedDimension(ServerPlayer player) {
         // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
-        PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
-            simulationDistanceBlocks(player.getServer())));
-        // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         UUID id = player.getUUID();
+        PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
+            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits()));
+        // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
         ACTIVE_NOTE_OWNERS.entrySet().removeIf(e -> e.getValue().isEmpty());
     }
@@ -436,7 +436,8 @@ public final class PolyphonyLinkManager {
             Vec3 pp = directPlayer.position();
             PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
-                true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt));
+                true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
+                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
             return true;
         }
 
@@ -463,7 +464,8 @@ public final class PolyphonyLinkManager {
             }
             PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
-                false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt));
+                false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt,
+                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
             sent = true;
         }
         return sent;
