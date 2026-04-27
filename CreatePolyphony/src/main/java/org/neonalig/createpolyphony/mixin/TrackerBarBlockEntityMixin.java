@@ -64,4 +64,5 @@ public abstract class TrackerBarBlockEntityMixin {
                 status, data1, data2, pos, t.toString());
         }
     }
+
 }

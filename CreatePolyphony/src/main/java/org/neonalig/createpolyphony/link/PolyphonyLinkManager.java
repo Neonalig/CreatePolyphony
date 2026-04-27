@@ -196,13 +196,38 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        if (desired.isEmpty()) return;
+        if (desired.isEmpty()) {
+            // Deployer no longer has any linked instrument context (e.g. item taken out).
+            // Remove stale channel assignment and stop any in-flight notes owned by it.
+            TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+            removeHolder(holderId, level);
+            return;
+        }
         syncHolderLinks(holderId, desired, level);
         Vec3 holderPosSnap = deployerPos != null
             ? deployerPos
             : (targetPos != null ? Vec3.atCenterOf(targetPos) : null);
         TRANSIENT_HOLDER_EXPIRY.put(holderId,
             new TransientHolderState(level, currentServerTick(level.getServer()) + automationHolderTtlTicks(), holderPosSnap));
+    }
+
+    /**
+     * Force-stop any notes still tracked for this tracker when playback halts abruptly.
+     * Called from tracker-stop mixin hooks as a safety net when sequencer NoteOffs are missing.
+     */
+    public static void onTrackerStopped(ServerLevel level, BlockPos pos) {
+        LinkKey key = LinkKey.of(level, pos);
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null || byNote.isEmpty()) return;
+
+        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+            ActiveNoteKey active = entry.getKey();
+            UUID owner = entry.getValue();
+            Vec3 ownerPos = resolveHolderPosition(level, owner);
+            sendNotePacket(level, pos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            byNote.remove(active);
+        }
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     private static int automationHolderTtlTicks() {
@@ -283,6 +308,14 @@ public final class PolyphonyLinkManager {
         }
 
         // We only deliver actual note events to clients.
+        if (command == 0xB0 /* ControlChange */) {
+            // MIDI All Sound Off / All Notes Off can arrive when transport stops abruptly.
+            if ((data1 & 0x7F) == 120 || (data1 & 0x7F) == 123) {
+                flushTrackedNotesForChannel(level, pos, channel);
+                debugRoute("sent:cc-all-notes-off", level, pos, status, data1, data2, null);
+            }
+            return;
+        }
         if (command != 0x80 /* NoteOff */ && command != 0x90 /* NoteOn */) {
             debugRoute("drop:non-note", level, pos, status, data1, data2, null);
             return;
@@ -480,6 +513,22 @@ public final class PolyphonyLinkManager {
         return ACTIVE_NOTE_OWNERS
             .computeIfAbsent(key, ignored -> new HashMap<>())
             .put(noteKey, assignee);
+    }
+
+    private static void flushTrackedNotesForChannel(ServerLevel level, BlockPos trackerPos, int channel) {
+        LinkKey key = LinkKey.of(level, trackerPos);
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null || byNote.isEmpty()) return;
+
+        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+            ActiveNoteKey active = entry.getKey();
+            if ((active.channel() & 0x0F) != (channel & 0x0F)) continue;
+            UUID owner = entry.getValue();
+            Vec3 ownerPos = resolveHolderPosition(level, owner);
+            sendNotePacket(level, trackerPos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            byNote.remove(active);
+        }
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     @Nullable
