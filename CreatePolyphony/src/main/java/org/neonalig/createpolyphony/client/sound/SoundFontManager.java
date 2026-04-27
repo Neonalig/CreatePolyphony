@@ -258,12 +258,17 @@ public final class SoundFontManager {
             return cancelLoadToNone();
         }
 
-        // Don't let callers pass arbitrary paths - we only accept basenames inside our dir.
-        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
-            CreatePolyphony.LOGGER.warn("Refusing suspicious soundfont path: {}", fileName);
+        // Only accept plain filenames that resolve to a file inside our directory.
+        // Use path normalization to catch traversal attempts rather than substring matching.
+        if (fileName.contains("/") || fileName.contains("\\")) {
+            CreatePolyphony.LOGGER.warn("Refusing soundfont path with directory separator: {}", fileName);
             return false;
         }
-        Path target = directory.resolve(fileName);
+        Path target = directory.resolve(fileName).normalize();
+        if (!target.startsWith(directory.normalize())) {
+            CreatePolyphony.LOGGER.warn("Refusing soundfont path outside soundfonts directory: {}", fileName);
+            return false;
+        }
         if (!Files.isRegularFile(target) || !fileName.toLowerCase(Locale.ROOT).endsWith(SF2_EXT)) {
             CreatePolyphony.LOGGER.warn("Soundfont not found or not an .sf2: {}", target);
             return false;
@@ -292,6 +297,7 @@ public final class SoundFontManager {
         PolyphonyClientNoteHandler.panic();
         notifyListeners();
 
+        CreatePolyphony.LOGGER.info("Async loading soundfont {}...", fileName);
         activeLoadTask = loadExecutor.submit(() -> {
             try {
                 synth.loadSoundFont(target.toFile());
