@@ -6,6 +6,7 @@
   "refmap": "createpolyphony.refmap.json",
   "client": [],
   "mixins": [
+    "DeployerHandlerMixin",
     "TrackerBarBlockEntityMixin"
   ],
   "injectors": {

@@ -3,12 +3,18 @@ package org.neonalig.createpolyphony.link;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.Nullable;
+import com.simibubi.create.content.logistics.depot.DepotBlockEntity;
 import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
@@ -69,6 +75,13 @@ public final class PolyphonyLinkManager {
     private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
+    /** Expiration tick for transient automation holders (deployer interactions, depot/ground stack targets). */
+    private static final Map<UUID, Long> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
+    /** Snapshot of currently synced mob holders per level for cheap stale-holder cleanup. */
+    private static final Map<String, Set<UUID>> ACTIVE_MOB_HOLDERS_BY_LEVEL = new HashMap<>();
+
+    private static final int MOB_SYNC_INTERVAL_TICKS = 10;
+    private static final int AUTOMATION_HOLDER_TTL_TICKS = 8;
 
     private PolyphonyLinkManager() {}
 
@@ -116,45 +129,56 @@ public final class PolyphonyLinkManager {
 
     /** Reconcile active link membership from linked instruments in main/off hand. */
     public static void syncPlayerHeldLinks(ServerPlayer player) {
-        UUID id = player.getUUID();
-        Map<LinkKey, HeldInstruments> desired = desiredHeldLinks(player);
-        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.get(id);
+        syncHolderLinks(player.getUUID(), desiredHeldLinks(player));
+    }
 
-        if (current != null) {
-            for (LinkKey key : Set.copyOf(current.keySet())) {
-                if (desired.containsKey(key)) continue;
-                PolyphonyLink link = LINKS.get(key);
-                if (link != null) {
-                    forceStopNotesOwnedBy(slFrom(player), key, id);
-                    link.removePlayer(id);
-                    if (link.isEmpty()) {
-                        LINKS.remove(key);
-                        ACTIVE_NOTE_OWNERS.remove(key);
-                        CHANNEL_PROGRAM_SNAPSHOT.remove(key);
-                    }
-                }
+    /** Called from level ticks: refresh mob holders and retire transient automation holders. */
+    public static void onLevelTick(ServerLevel level) {
+        pruneExpiredTransientHolders(level);
+        long gameTime = level.getGameTime();
+        if (gameTime % MOB_SYNC_INTERVAL_TICKS != 0) return;
+        syncMobHolders(level);
+    }
+
+    /** Remove all link participation state for a non-player holder that left the level. */
+    public static void onNonPlayerHolderRemoved(UUID holderId) {
+        if (holderId == null) return;
+        if (ACTIVE_HAND_LINKS.containsKey(holderId)) {
+            removeHolder(holderId, null);
+        }
+        TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+    }
+
+    /**
+     * Feed deployer activity into the link manager so powered automation can
+     * participate as a non-player performer.
+     */
+    public static void registerAutomationActivation(ServerLevel level,
+                                                    UUID holderId,
+                                                    @Nullable ItemStack deployerHeld,
+                                                    @Nullable BlockPos targetPos) {
+        if (holderId == null) return;
+
+        Map<LinkKey, HeldInstruments> desired = new HashMap<>();
+        if (deployerHeld != null) {
+            collectHeldLink(desired, deployerHeld, true);
+        }
+
+        if (targetPos != null) {
+            if (level.getBlockEntity(targetPos) instanceof DepotBlockEntity depot) {
+                collectHeldLink(desired, depot.getHeldItem(), false);
+            }
+
+            AABB targetBox = new AABB(targetPos).inflate(0.6D);
+            for (ItemEntity itemEntity : level.getEntitiesOfClass(ItemEntity.class, targetBox)) {
+                collectHeldLink(desired, itemEntity.getItem(), false);
             }
         }
 
-        for (Map.Entry<LinkKey, HeldInstruments> entry : desired.entrySet()) {
-            LinkKey key = entry.getKey();
-            HeldInstruments held = entry.getValue();
-            if (current != null && held.equals(current.get(key))) continue;
-
-            PolyphonyLink link = LINKS.get(key);
-            if (link == null) {
-                link = new PolyphonyLink(key.levelPath(), key.pos());
-                primeLinkProgramsFromSnapshot(key, link);
-                LINKS.put(key, link);
-            }
-            link.addOrRefreshPlayer(player, held.mainHandFamily(), held.offHandFamily());
-        }
-
-        if (desired.isEmpty()) {
-            ACTIVE_HAND_LINKS.remove(id);
-        } else {
-            ACTIVE_HAND_LINKS.put(id, desired);
-        }
+        if (desired.isEmpty()) return;
+        syncHolderLinks(holderId, desired);
+        long now = currentServerTick(level.getServer());
+        TRANSIENT_HOLDER_EXPIRY.put(holderId, now + AUTOMATION_HOLDER_TTL_TICKS);
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -240,12 +264,7 @@ public final class PolyphonyLinkManager {
         UUID assigneePlayerId = assignee.playerId();
 
         ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneePlayerId);
-        if (target == null) {
-            debugRoute("drop:no-player", level, pos, status, data1, data2, assigneePlayerId);
-            return;
-        }
-
-        if (!holdsLinkedInstrument(target, key)) {
+        if (target != null && !holdsLinkedInstrument(target, key)) {
             // Don't hard-drop note routing here; assignment already came from held-link sync.
             debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneePlayerId);
         }
@@ -298,28 +317,23 @@ public final class PolyphonyLinkManager {
 
     /** Drop active held-link participation for a logging-out player. */
     public static void onPlayerLogout(ServerPlayer player) {
-        UUID id = player.getUUID();
-        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(id);
-        if (current == null) return;
-        for (LinkKey key : current.keySet()) {
-            forceStopNotesOwnedBy(slFrom(player), key, id);
-            PolyphonyLink link = LINKS.get(key);
-            if (link == null) continue;
-            link.removePlayer(id);
-            if (link.isEmpty()) {
-                LINKS.remove(key);
-                ACTIVE_NOTE_OWNERS.remove(key);
-                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
-            }
-        }
+        removeHolder(player.getUUID(), slFrom(player));
     }
 
-    private static boolean sendNotePacket(ServerLevel level, UUID assignee, int program, int channel, int command, int note, int velocity) {
-        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
-        if (target == null) return false;
-        PacketDistributor.sendToPlayer(target,
-            new PlayInstrumentNotePayload(program, channel, command, note, velocity));
-        return true;
+    private static boolean sendNotePacket(ServerLevel level, UUID holderId, int program, int channel, int command, int note, int velocity) {
+        PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(program, channel, command, note, velocity);
+        ServerPlayer directPlayer = level.getServer().getPlayerList().getPlayer(holderId);
+        if (directPlayer != null) {
+            PacketDistributor.sendToPlayer(directPlayer, payload);
+            return true;
+        }
+
+        boolean sent = false;
+        for (ServerPlayer watcher : level.players()) {
+            PacketDistributor.sendToPlayer(watcher, payload);
+            sent = true;
+        }
+        return sent;
     }
 
     private static UUID trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, UUID assignee) {
@@ -363,6 +377,106 @@ public final class PolyphonyLinkManager {
         return player.level() instanceof ServerLevel sl ? sl : null;
     }
 
+    private static void syncHolderLinks(UUID holderId, Map<LinkKey, HeldInstruments> desired) {
+        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.get(holderId);
+
+        if (current != null) {
+            for (LinkKey key : Set.copyOf(current.keySet())) {
+                if (desired.containsKey(key)) continue;
+                PolyphonyLink link = LINKS.get(key);
+                if (link != null) {
+                    link.removePlayer(holderId);
+                    if (link.isEmpty()) {
+                        LINKS.remove(key);
+                        ACTIVE_NOTE_OWNERS.remove(key);
+                        CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+                    }
+                }
+            }
+        }
+
+        for (Map.Entry<LinkKey, HeldInstruments> entry : desired.entrySet()) {
+            LinkKey key = entry.getKey();
+            HeldInstruments held = entry.getValue();
+            if (current != null && held.equals(current.get(key))) continue;
+
+            PolyphonyLink link = LINKS.get(key);
+            if (link == null) {
+                link = new PolyphonyLink(key.levelPath(), key.pos());
+                primeLinkProgramsFromSnapshot(key, link);
+                LINKS.put(key, link);
+            }
+            link.addOrRefreshPlayer(holderId, held.mainHandFamily(), held.offHandFamily());
+        }
+
+        if (desired.isEmpty()) {
+            ACTIVE_HAND_LINKS.remove(holderId);
+        } else {
+            ACTIVE_HAND_LINKS.put(holderId, desired);
+        }
+    }
+
+    private static void removeHolder(UUID holderId, @Nullable ServerLevel levelHint) {
+        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(holderId);
+        if (current == null) return;
+        for (LinkKey key : current.keySet()) {
+            forceStopNotesOwnedBy(levelHint, key, holderId);
+            PolyphonyLink link = LINKS.get(key);
+            if (link == null) continue;
+            link.removePlayer(holderId);
+            if (link.isEmpty()) {
+                LINKS.remove(key);
+                ACTIVE_NOTE_OWNERS.remove(key);
+                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+            }
+        }
+    }
+
+    private static void pruneExpiredTransientHolders(ServerLevel level) {
+        if (TRANSIENT_HOLDER_EXPIRY.isEmpty()) return;
+        long now = currentServerTick(level.getServer());
+        for (Map.Entry<UUID, Long> entry : Map.copyOf(TRANSIENT_HOLDER_EXPIRY).entrySet()) {
+            if (entry.getValue() > now) continue;
+            UUID holderId = entry.getKey();
+            TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+            removeHolder(holderId, null);
+        }
+    }
+
+    private static void syncMobHolders(ServerLevel level) {
+        String levelPath = level.dimension().location().toString();
+        Set<UUID> previous = ACTIVE_MOB_HOLDERS_BY_LEVEL.getOrDefault(levelPath, Set.of());
+        Set<UUID> seen = new java.util.HashSet<>();
+
+        for (Entity entity : level.getAllEntities()) {
+            if (!(entity instanceof Mob mob)) continue;
+
+            Map<LinkKey, HeldInstruments> desired = desiredHeldLinks(
+                mob.getItemBySlot(EquipmentSlot.MAINHAND),
+                mob.getItemBySlot(EquipmentSlot.OFFHAND));
+            if (desired.isEmpty()) continue;
+
+            UUID holderId = mob.getUUID();
+            syncHolderLinks(holderId, desired);
+            seen.add(holderId);
+        }
+
+        for (UUID stale : previous) {
+            if (seen.contains(stale)) continue;
+            removeHolder(stale, null);
+        }
+
+        if (seen.isEmpty()) {
+            ACTIVE_MOB_HOLDERS_BY_LEVEL.remove(levelPath);
+        } else {
+            ACTIVE_MOB_HOLDERS_BY_LEVEL.put(levelPath, seen);
+        }
+    }
+
+    private static long currentServerTick(MinecraftServer server) {
+        return server.getTickCount();
+    }
+
     private static boolean holdsLinkedInstrument(ServerPlayer player, LinkKey key) {
         ItemStack main = player.getItemBySlot(EquipmentSlot.MAINHAND);
         if (InstrumentItem.familyOf(main) != null && InstrumentLinkData.matches(main, key)) return true;
@@ -372,9 +486,15 @@ public final class PolyphonyLinkManager {
     }
 
     private static Map<LinkKey, HeldInstruments> desiredHeldLinks(ServerPlayer player) {
+        return desiredHeldLinks(
+            player.getItemBySlot(EquipmentSlot.MAINHAND),
+            player.getItemBySlot(EquipmentSlot.OFFHAND));
+    }
+
+    private static Map<LinkKey, HeldInstruments> desiredHeldLinks(ItemStack mainHand, ItemStack offHand) {
         Map<LinkKey, HeldInstruments> desired = new HashMap<>();
-        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.MAINHAND), true);
-        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND), false);
+        collectHeldLink(desired, mainHand, true);
+        collectHeldLink(desired, offHand, false);
         return desired;
     }
 

@@ -1,7 +1,6 @@
 package org.neonalig.createpolyphony.link;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerPlayer;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 
@@ -95,15 +94,14 @@ public final class PolyphonyLink {
      *
      * @return {@code true} if this was a new link, {@code false} if it was a refresh.
      */
-    public boolean addOrRefreshPlayer(ServerPlayer player,
+    public boolean addOrRefreshPlayer(UUID holderId,
                                       @Nullable InstrumentFamily mainHandFamily,
                                       @Nullable InstrumentFamily offHandFamily) {
         if (mainHandFamily == null && offHandFamily == null) {
             return false;
         }
-        UUID id = player.getUUID();
-        boolean isNew = !players.containsKey(id);
-        players.put(id, new LinkedPlayer(id, mainHandFamily, offHandFamily));
+        boolean isNew = !players.containsKey(holderId);
+        players.put(holderId, new LinkedPlayer(holderId, mainHandFamily, offHandFamily));
         recomputeAssignments();
         return isNew;
     }
