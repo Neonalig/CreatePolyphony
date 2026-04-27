@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.mixin;
+package org.neonalig.createpolyphony.mixin;
 
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;

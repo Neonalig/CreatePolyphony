@@ -130,6 +130,20 @@ public class Config {
     public static SynthSettings synthSettings() {
         // OpenAL only spatializes mono sources; keep synth output mono so holder audio
         // can pan and attenuate in world space.
-        return new SynthSettings(44_100f, 1, 16, MAX_VOICES.get(), RING_BUFFER_BYTES.get(), PUMP_CHUNK_BYTES.get());
+        //
+        // Historically these byte-sized knobs were tuned while output was stereo.
+        // After moving to mono, using the same raw byte counts doubles effective
+        // time latency (e.g. 44_100 bytes becomes ~500 ms instead of ~250 ms).
+        // Scale by channel ratio so existing configs keep the same timing feel.
+        int channels = 1;
+        int ringBufferBytes = scaleLegacyStereoBytes(RING_BUFFER_BYTES.get(), channels, 8_192);
+        int pumpChunkBytes = scaleLegacyStereoBytes(PUMP_CHUNK_BYTES.get(), channels, 512);
+        return new SynthSettings(44_100f, channels, 16, MAX_VOICES.get(), ringBufferBytes, pumpChunkBytes);
+    }
+
+    private static int scaleLegacyStereoBytes(int configuredBytes, int channels, int minBytes) {
+        long scaled = (long) configuredBytes * (long) Math.max(1, channels);
+        scaled /= 2L; // legacy baseline was stereo (2 channels)
+        return (int) Math.max(minBytes, Math.min(Integer.MAX_VALUE, scaled));
     }
 }
