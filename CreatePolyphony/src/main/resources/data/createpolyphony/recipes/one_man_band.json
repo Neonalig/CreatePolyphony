@@ -1,0 +1,38 @@
+﻿{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "createpolyphony:piano"
+    },
+    {
+      "item": "createpolyphony:acoustic_guitar"
+    },
+    {
+      "item": "createpolyphony:electric_guitar"
+    },
+    {
+      "item": "createpolyphony:bass_guitar"
+    },
+    {
+      "item": "createpolyphony:violin"
+    },
+    {
+      "item": "createpolyphony:trumpet"
+    },
+    {
+      "item": "createpolyphony:flute"
+    },
+    {
+      "item": "createpolyphony:accordion"
+    },
+    {
+      "item": "createpolyphony:drum_kit"
+    }
+  ],
+  "result": {
+    "id": "createpolyphony:one_man_band",
+    "count": 1
+  }
+}
+

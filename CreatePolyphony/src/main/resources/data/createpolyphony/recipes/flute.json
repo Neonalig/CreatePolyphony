@@ -1,0 +1,22 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "  G",
+    " SG",
+    "S  "
+  ],
+  "key": {
+    "S": {
+      "item": "minecraft:bamboo"
+    },
+    "G": {
+      "item": "minecraft:gold_nugget"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:flute",
+    "count": 1
+  }
+}
+
