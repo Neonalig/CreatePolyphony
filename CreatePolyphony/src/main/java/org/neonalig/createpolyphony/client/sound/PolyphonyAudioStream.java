@@ -49,6 +49,8 @@ import java.nio.ByteOrder;
 @OnlyIn(Dist.CLIENT)
 public final class PolyphonyAudioStream implements AudioStream {
 
+    private static final int TARGET_RENDER_CHUNK_BYTES = 4_096;
+
     private final PolyphonySynthesizer synth;
     private final AudioFormat format;
     /** Reusable scratch buffer to avoid per-read allocation. */
@@ -77,8 +79,9 @@ public final class PolyphonyAudioStream implements AudioStream {
     @Override
     public ByteBuffer read(int size) throws IOException {
         int frame = synth.settings().frameSize();
-        // Never hand OpenAL an empty payload; keep one frame minimum.
-        int request = Math.max(frame, Math.min(size, scratch.length));
+        // Keep chunks modest to reduce event batching latency on tracker playback.
+        int boundedSize = Math.min(size, TARGET_RENDER_CHUNK_BYTES);
+        int request = Math.max(frame, Math.min(boundedSize, scratch.length));
         request -= request % frame;
         if (request <= 0) {
             request = frame;

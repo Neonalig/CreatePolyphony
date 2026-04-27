@@ -301,7 +301,9 @@ public final class MeltySynthEngine {
 
     private void startRelease(Voice voice) {
         voice.inRelease = true;
-        voice.currentGain = Math.max(voice.currentGain, 0.0005F);
+        // If NoteOff arrives before attack ramps (same audio block), keep an audible tail.
+        float releaseStart = Math.max(voice.currentGain, voice.targetGain * 0.55F);
+        voice.currentGain = Math.max(releaseStart, 0.0005F);
         voice.releaseDelta = voice.currentGain / Math.max(1F, sampleRate * 0.08F);
     }
 

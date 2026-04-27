@@ -9,6 +9,7 @@ import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Client-side handler for {@link PlayInstrumentNotePayload}.
@@ -63,6 +64,9 @@ public final class PolyphonyClientNoteHandler {
     /** The single sound instance carrying our synth's PCM into OpenAL. */
     private static PolyphonySynthSoundInstance activeStream = null;
 
+    /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
+    private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
+
     static {
         Arrays.fill(lastProgram, -1);
     }
@@ -83,10 +87,12 @@ public final class PolyphonyClientNoteHandler {
         if (synth == null) {
             // No active soundfont selected (or synth boot failed) - silently drop.
             // The user picked "None / No Sound" or hasn't picked anything yet.
+            debugNote("drop:no-synth", payload);
             return;
         }
 
         ensureStream(synth);
+        debugNote("recv", payload);
 
         int channel = payload.channel() & 0x0F;
         int note = payload.note() & 0x7F;
@@ -101,8 +107,10 @@ public final class PolyphonyClientNoteHandler {
 
         if (payload.isNoteOn()) {
             synth.noteOn(channel, note, velocity);
+            debugNote("note-on", payload);
         } else if (payload.isNoteOff()) {
             synth.noteOff(channel, note);
+            debugNote("note-off", payload);
         }
         // Anything else (e.g. CC, pitch-bend) would be added here once the
         // server-side packet payload grows to carry them.
@@ -113,10 +121,19 @@ public final class PolyphonyClientNoteHandler {
      * something to play. Subsequent NoteOns just feed the running synth.
      */
     private static void ensureStream(PolyphonySynthesizer synth) {
-        if (activeStream != null && !activeStream.isStopped()) return;
+        if (activeStream != null && !activeStream.isStopped()) {
+            // Keep handler state aligned with the real SoundEngine channel state.
+            // If OpenAL/SoundEngine dropped the channel, recreate on next packet.
+            if (Minecraft.getInstance().getSoundManager().isActive(activeStream)) {
+                return;
+            }
+            debugStream("restart:inactive");
+            activeStream = null;
+        }
         // Either we never started one, or the previous stream got stopped
         // (synth swap, world change). Start a fresh instance.
         activeStream = new PolyphonySynthSoundInstance(synth);
+        debugStream("start");
         Minecraft.getInstance().getSoundManager().play(activeStream);
     }
 
@@ -162,5 +179,23 @@ public final class PolyphonyClientNoteHandler {
             CreatePolyphony.LOGGER.error("synthSupplier threw", t);
             return null;
         }
+    }
+
+    private static void debugNote(String phase, PlayInstrumentNotePayload payload) {
+        if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
+        if (NOTE_DEBUG_BUDGET.getAndDecrement() <= 0) return;
+        CreatePolyphony.LOGGER.debug(
+            "client:{} st=0x{} ch={} note={} vel={} prog={}",
+            phase,
+            Integer.toHexString(payload.command() & 0xFF),
+            payload.channel() & 0x0F,
+            payload.note() & 0x7F,
+            payload.velocity() & 0x7F,
+            payload.program() & 0x7F);
+    }
+
+    private static void debugStream(String phase) {
+        if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
+        CreatePolyphony.LOGGER.debug("client:stream:{}", phase);
     }
 }

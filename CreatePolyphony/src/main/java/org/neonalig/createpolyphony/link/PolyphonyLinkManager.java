@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Server-side registry of every active {@link PolyphonyLink}, keyed by
@@ -56,7 +57,10 @@ public final class PolyphonyLinkManager {
     /** Map from (level dimension key path, BlockPos) -&gt; link. */
     private static final Map<LinkKey, PolyphonyLink> LINKS = new HashMap<>();
 
-    /** Active held-link participation: player UUID -&gt; links currently in hand/off-hand. */
+    /** Limited debug breadcrumbs for note-routing diagnosis without log spam. */
+    private static final AtomicInteger NOTE_ROUTE_DEBUG_BUDGET = new AtomicInteger(64);
+
+    /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
     private static final Map<UUID, Map<LinkKey, InstrumentFamily>> ACTIVE_HAND_LINKS = new HashMap<>();
 
     private PolyphonyLinkManager() {}
@@ -165,7 +169,10 @@ public final class PolyphonyLinkManager {
      */
     public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
         PolyphonyLink link = get(level, pos);
-        if (link == null || link.isEmpty()) return;
+        if (link == null || link.isEmpty()) {
+            debugRoute("drop:no-link", level, pos, status, data1, data2, null);
+            return;
+        }
 
         int command = status & 0xF0;
         int channel = status & 0x0F;
@@ -174,22 +181,32 @@ public final class PolyphonyLinkManager {
         // can prefer matching instrument families.
         if (command == 0xC0 /* ProgramChange */) {
             link.setChannelProgram(channel, data1 & 0x7F);
+            debugRoute("program", level, pos, status, data1, data2, null);
             return;
         }
 
         // We only deliver actual note events to clients.
-        if (command != 0x80 /* NoteOff */ && command != 0x90 /* NoteOn */) return;
+        if (command != 0x80 /* NoteOff */ && command != 0x90 /* NoteOn */) {
+            debugRoute("drop:non-note", level, pos, status, data1, data2, null);
+            return;
+        }
 
         UUID assignee = link.assigneeFor(channel);
-        if (assignee == null) return;
+        if (assignee == null) {
+            debugRoute("drop:no-assignee", level, pos, status, data1, data2, null);
+            return;
+        }
 
         ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
-        if (target == null) return;
+        if (target == null) {
+            debugRoute("drop:no-player", level, pos, status, data1, data2, assignee);
+            return;
+        }
 
         LinkKey key = LinkKey.of(level, pos);
         if (!holdsLinkedInstrument(target, key)) {
-            // Keep the link registered, but mute while the linked instrument is not in hand.
-            return;
+            // Don't hard-drop note routing here; assignment already came from held-link sync.
+            debugRoute("warn:not-holding", level, pos, status, data1, data2, assignee);
         }
 
         // Sample lookup is keyed on GM program. By convention, channel 10 (index 9)
@@ -206,10 +223,14 @@ public final class PolyphonyLinkManager {
         // Even though the assignee's held InstrumentFamily isn't on the wire,
         // we still resolve it server-side as a sanity check / debug breadcrumb.
         InstrumentFamily family = link.familyOf(assignee);
-        if (family == null) return;
+        if (family == null) {
+            debugRoute("drop:no-family", level, pos, status, data1, data2, assignee);
+            return;
+        }
 
         PacketDistributor.sendToPlayer(target,
-            new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
+             new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
+        debugRoute("sent", level, pos, status, data1, data2, assignee);
     }
 
     /** Drop active held-link participation for a logging-out player. */
@@ -279,5 +300,15 @@ public final class PolyphonyLinkManager {
         @Override public String toString() {
             return levelPath + "@" + pos.toShortString();
         }
+    }
+
+    private static void debugRoute(String phase, ServerLevel level, BlockPos pos,
+                                   int status, int data1, int data2, @Nullable UUID assignee) {
+        if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
+        if (NOTE_ROUTE_DEBUG_BUDGET.getAndDecrement() <= 0) return;
+        CreatePolyphony.LOGGER.debug(
+            "route:{} dim={} pos={} st=0x{} d1={} d2={} assignee={}",
+            phase, level.dimension().location(), pos.toShortString(),
+            Integer.toHexString(status & 0xFF), data1 & 0x7F, data2 & 0x7F, assignee);
     }
 }

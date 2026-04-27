@@ -52,9 +52,8 @@ public final class SoundFontGuiInteractionHandler {
     private static boolean openScreen() {
         SoundFontManager manager = SoundFontManager.get();
         if (manager == null) return false;
-        Minecraft.getInstance().setScreen(new SoundFontPickerScreen(manager));
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> mc.setScreen(new SoundFontPickerScreen(manager)));
         return true;
     }
 }
-
-
