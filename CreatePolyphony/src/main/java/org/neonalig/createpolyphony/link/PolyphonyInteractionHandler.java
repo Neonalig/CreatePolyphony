@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -119,6 +120,14 @@ public final class PolyphonyInteractionHandler {
         ItemStack crafted = event.getCrafting();
         if (!(crafted.getItem() instanceof InstrumentItem)) return;
         PolyphonyAdvancementGrants.grantForHeldInstrument(player, crafted);
+    }
+
+    @SubscribeEvent
+    public static void onItemPickup(ItemEntityPickupEvent.Post event) {
+        if (!(event.getPlayer() instanceof ServerPlayer player)) return;
+        ItemStack pickedUp = event.getItemEntity().getItem();
+        if (!(pickedUp.getItem() instanceof InstrumentItem)) return;
+        PolyphonyAdvancementGrants.grantForHeldInstrument(player, pickedUp);
     }
 
     @SubscribeEvent
