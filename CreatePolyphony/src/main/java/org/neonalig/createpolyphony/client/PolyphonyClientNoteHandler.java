@@ -10,6 +10,7 @@ import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import java.util.Arrays;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -68,9 +69,12 @@ public final class PolyphonyClientNoteHandler {
 
     private static final int BUS_IDLE_TIMEOUT_TICKS = 20 * 12;
     private static final int MAX_SOURCE_BUSES = 24;
+    private static final int MAX_IDLE_SYNTH_POOL = 8;
 
     /** One independent synth/stream per holder source UUID for positional separation. */
     private static final Map<UUID, SourceBus> SOURCE_BUSES = new HashMap<>();
+    /** Prewarmed loaded synths recycled from idle buses to avoid SF2 reload hitch on resume. */
+    private static final ArrayDeque<PooledSynth> IDLE_SYNTH_POOL = new ArrayDeque<>();
     private static int lastSoundfontGeneration = Integer.MIN_VALUE;
 
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
@@ -203,9 +207,12 @@ public final class PolyphonyClientNoteHandler {
     public static void stopAll() {
         Arrays.fill(lastProgram, -1);
         for (SourceBus bus : SOURCE_BUSES.values()) {
-            bus.close();
+            bus.closeFully();
         }
         SOURCE_BUSES.clear();
+        while (!IDLE_SYNTH_POOL.isEmpty()) {
+            closeQuietly(IDLE_SYNTH_POOL.removeFirst().synth());
+        }
     }
 
     private static void pruneIdleBuses(int nowTick) {
@@ -215,7 +222,7 @@ public final class PolyphonyClientNoteHandler {
             Map.Entry<UUID, SourceBus> entry = it.next();
             SourceBus bus = entry.getValue();
             if ((nowTick - bus.lastTouchedTick) <= BUS_IDLE_TIMEOUT_TICKS) continue;
-            bus.close();
+            recycleIdleBus(bus);
             it.remove();
         }
         if (SOURCE_BUSES.size() <= MAX_SOURCE_BUSES) return;
@@ -228,15 +235,48 @@ public final class PolyphonyClientNoteHandler {
             }
         }
         if (oldest != null && oldestId != null) {
-            oldest.close();
+            recycleIdleBus(oldest);
             SOURCE_BUSES.remove(oldestId);
         }
     }
 
+    private static void recycleIdleBus(SourceBus bus) {
+        PolyphonySynthesizer synth = bus.detachForReuse();
+        if (synth == null) return;
+        if (IDLE_SYNTH_POOL.size() >= MAX_IDLE_SYNTH_POOL) {
+            closeQuietly(synth);
+            return;
+        }
+        IDLE_SYNTH_POOL.addLast(new PooledSynth(lastSoundfontGeneration, synth));
+        if (CreatePolyphony.LOGGER.isDebugEnabled()) {
+            CreatePolyphony.LOGGER.debug("client:bus:recycle:{}", bus.sourceId);
+        }
+    }
+
     private static SourceBus createBus(SoundFontManager manager, UUID sourceId) {
-        PolyphonySynthesizer synth = manager.createIsolatedSynth();
+        PolyphonySynthesizer synth = borrowPrewarmedSynth(lastSoundfontGeneration);
+        if (synth == null) {
+            synth = manager.createIsolatedSynth();
+        }
         if (synth == null) return null;
         return new SourceBus(sourceId, synth);
+    }
+
+    private static PolyphonySynthesizer borrowPrewarmedSynth(int expectedGeneration) {
+        while (!IDLE_SYNTH_POOL.isEmpty()) {
+            PooledSynth pooled = IDLE_SYNTH_POOL.removeLast();
+            if (pooled.generation() != expectedGeneration) {
+                closeQuietly(pooled.synth());
+                continue;
+            }
+            return pooled.synth();
+        }
+        return null;
+    }
+
+    private static void closeQuietly(PolyphonySynthesizer synth) {
+        try { synth.allNotesOff(); } catch (Throwable ignored) { }
+        try { synth.close(); } catch (Throwable ignored) { }
     }
 
     /** Emergency hard-stop for all local synth output. */
@@ -303,7 +343,16 @@ public final class PolyphonyClientNoteHandler {
             Arrays.fill(this.lastProgram, -1);
         }
 
-        private void close() {
+        private PolyphonySynthesizer detachForReuse() {
+            try { synth.allNotesOff(); } catch (Throwable ignored) { }
+            if (stream != null) {
+                stream.stopInstance();
+                stream = null;
+            }
+            return synth;
+        }
+
+        private void closeFully() {
             try { synth.allNotesOff(); } catch (Throwable ignored) { }
             try { synth.close(); } catch (Throwable ignored) { }
             if (stream != null) {
@@ -315,4 +364,6 @@ public final class PolyphonyClientNoteHandler {
             }
         }
     }
+
+    private record PooledSynth(int generation, PolyphonySynthesizer synth) { }
 }
