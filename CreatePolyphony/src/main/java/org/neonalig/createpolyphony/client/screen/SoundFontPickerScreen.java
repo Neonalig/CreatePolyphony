@@ -216,6 +216,8 @@ public final class SoundFontPickerScreen extends Screen {
         private final class Entry extends ObjectSelectionList.Entry<SoundFontList.Entry> {
             @Nullable
             private final String fileName;
+            /** Timestamp of the last left-click on this entry, used to detect double-clicks. */
+            private long lastClickTime = Long.MIN_VALUE;
 
             private Entry(@Nullable String fileName) {
                 this.fileName = fileName;
@@ -253,7 +255,14 @@ public final class SoundFontPickerScreen extends Screen {
                     return false;
                 }
                 if (button == 0) {
+                    long now = Util.getMillis();
+                    boolean isDoubleClick = SoundFontList.this.getSelected() == this
+                        && now - lastClickTime < 500L;
+                    lastClickTime = now;
                     SoundFontList.this.setSelected(this);
+                    if (isDoubleClick) {
+                        onSetActive();
+                    }
                     return true;
                 }
                 return false;
