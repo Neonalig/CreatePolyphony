@@ -173,10 +173,13 @@ public final class PolyphonyLink {
         if (players.isEmpty()) return;
 
         // Solo policy: non-drum instruments cover melodic channels; drum-kit covers drums only.
+        // ONE_MAN_BAND (wildcard) covers all 16 channels simultaneously.
         if (players.size() == 1) {
             LinkedPlayer only = players.values().iterator().next();
             for (int ch = 0; ch < 16; ch++) {
-                if (only.family() == InstrumentFamily.DRUM_KIT) {
+                if (only.family().isWildcard()) {
+                    channelAssignments[ch] = only.id();
+                } else if (only.family() == InstrumentFamily.DRUM_KIT) {
                     channelAssignments[ch] = (ch == 9) ? only.id() : null;
                 } else {
                     channelAssignments[ch] = (ch == 9) ? null : only.id();
@@ -216,7 +219,8 @@ public final class PolyphonyLink {
         UUID best = null;
         int bestLoad = Integer.MAX_VALUE;
         for (LinkedPlayer lp : order) {
-            if (lp.family() != preferred) continue;
+            // Wildcard (ONE_MAN_BAND) matches every preferred family.
+            if (lp.family() != preferred && !lp.family().isWildcard()) continue;
             int l = load.get(lp.id());
             if (l < bestLoad) {
                 bestLoad = l;
@@ -234,7 +238,8 @@ public final class PolyphonyLink {
         int bestLoad = Integer.MAX_VALUE;
         for (LinkedPlayer lp : order) {
             boolean isDrum = lp.family() == InstrumentFamily.DRUM_KIT;
-            if (drumsOnly != isDrum) continue;
+            // Wildcard (ONE_MAN_BAND) is always eligible regardless of drumsOnly.
+            if (!lp.family().isWildcard() && drumsOnly != isDrum) continue;
             int l = load.get(lp.id());
             if (l < bestLoad) {
                 bestLoad = l;

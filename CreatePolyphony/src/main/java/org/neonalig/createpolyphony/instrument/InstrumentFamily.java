@@ -49,7 +49,13 @@ public enum InstrumentFamily {
     TRUMPET("trumpet"),
     FLUTE("flute"),
     ACCORDION("accordion"),
-    DRUM_KIT("drum_kit");
+    DRUM_KIT("drum_kit"),
+    /**
+     * Special wildcard instrument: covers every MIDI channel (melodic and drums alike)
+     * and uses the actual GM program from the MIDI file rather than a fixed family timbre.
+     * Equivalent to a single performer playing "one man band" style.
+     */
+    ONE_MAN_BAND("one_man_band");
 
     /** Lower-case path-safe name used as the registry id and translation key fragment. */
     private final String id;
@@ -60,6 +66,15 @@ public enum InstrumentFamily {
 
     public String getId() {
         return id;
+    }
+
+    /**
+     * Returns {@code true} for "wildcard" instruments (currently only
+     * {@link #ONE_MAN_BAND}) that cover every MIDI channel regardless of family
+     * and play the raw MIDI file program rather than a fixed canonical timbre.
+     */
+    public boolean isWildcard() {
+        return this == ONE_MAN_BAND;
     }
 
     /** Resource location for this family's main item, e.g. {@code createpolyphony:piano}. */
@@ -135,6 +150,9 @@ public enum InstrumentFamily {
             case FLUTE -> 73;           // Flute
             case ACCORDION -> 21;       // Accordion
             case DRUM_KIT -> 127;       // Channel 10 drum kit sentinel
+            // ONE_MAN_BAND never uses canonicalGmProgram(); the caller should
+            // fall back to the actual channel program from the MIDI file.
+            case ONE_MAN_BAND -> 0;
         };
     }
 
