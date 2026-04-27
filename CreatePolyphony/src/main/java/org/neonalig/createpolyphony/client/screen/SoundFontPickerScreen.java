@@ -33,6 +33,12 @@ public final class SoundFontPickerScreen extends Screen {
     private Button panicButton;
     private Button cancelLoadButton;
 
+    private int headerTop;
+    private int headerBottom;
+    private int listTop;
+    private int listBottom;
+    private int footerTop;
+
     public SoundFontPickerScreen(SoundFontManager manager) {
         super(TITLE);
         this.manager = Objects.requireNonNull(manager);
@@ -43,9 +49,14 @@ public final class SoundFontPickerScreen extends Screen {
     protected void init() {
         super.init();
 
-        int listTop = 32;
-        int listBottom = this.height - 60;
-        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, this.width, listBottom, listTop, 20));
+        headerTop = 8;
+        headerBottom = 56;
+        footerTop = this.height - 56;
+        listTop = headerBottom + 6;
+        listBottom = footerTop - 6;
+
+        int listWidth = Math.min(420, this.width - 24);
+        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, listWidth, listBottom, listTop, 20));
 
         int buttonY = this.height - 28;
         int pad = 6;
@@ -149,28 +160,39 @@ public final class SoundFontPickerScreen extends Screen {
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(guiGraphics, mouseX, mouseY, partialTick);
+
+        // Header panel: title + loading state
+        guiGraphics.fill(8, headerTop, this.width - 8, headerBottom, 0x88202020);
+        // List panel backdrop
+        guiGraphics.fill(8, listTop - 4, this.width - 8, listBottom + 4, 0x66161616);
+        // Footer panel: folder path + actions
+        guiGraphics.fill(8, footerTop, this.width - 8, this.height - 8, 0x88202020);
+
         super.render(guiGraphics, mouseX, mouseY, partialTick);
 
-        guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
+        guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, headerTop + 5, 0xFFFFFF);
         if (manager.isLoading()) {
             String pending = manager.pending();
             Component loadingText = pending == null
                 ? LOADING_LABEL
                 : Component.translatable("screen.createpolyphony.soundfont.loading_name", pending);
-            guiGraphics.drawCenteredString(this.font, loadingText, this.width / 2, 24, 0xFFE37C);
+            guiGraphics.drawCenteredString(this.font, loadingText, this.width / 2, headerTop + 19, 0xFFE37C);
 
-            int barW = Math.min(240, this.width - 40);
+            int barW = Math.min(260, this.width - 80);
             int barH = 8;
             int barX = (this.width - barW) / 2;
-            int barY = 24 + this.font.lineHeight + 4;
+            int barY = headerTop + 33;
             guiGraphics.fill(barX, barY, barX + barW, barY + barH, 0xFF2A2A2A);
             int fill = Math.max(1, Math.min(barW, Math.round(barW * manager.loadingProgress01())));
             guiGraphics.fill(barX + 1, barY + 1, barX + fill - 1, barY + barH - 1, 0xFF7CFF7C);
         }
+
+        String folderPath = manager.directory().toAbsolutePath().toString();
+        String clippedFolderPath = this.font.plainSubstrByWidth(folderPath, this.width - 26);
         guiGraphics.drawString(this.font,
-            Component.translatable("screen.createpolyphony.soundfont.folder", manager.directory().toAbsolutePath().toString()),
-            10,
-            this.height - 48,
+            Component.translatable("screen.createpolyphony.soundfont.folder", clippedFolderPath),
+            12,
+            footerTop + 6,
             0xA0A0A0,
             false);
     }
@@ -182,8 +204,21 @@ public final class SoundFontPickerScreen extends Screen {
 
     private final class SoundFontList extends ObjectSelectionList<SoundFontList.Entry> {
 
+        private final int rowWidth;
+
         private SoundFontList(Minecraft minecraft, int width, int bottom, int top, int itemHeight) {
             super(minecraft, width, bottom, top, itemHeight);
+            this.rowWidth = width;
+        }
+
+        @Override
+        public int getRowWidth() {
+            return rowWidth;
+        }
+
+        @Override
+        public int getRowLeft() {
+            return (SoundFontPickerScreen.this.width - rowWidth) / 2;
         }
 
         private void rebuild(Iterable<String> fileNames) {
