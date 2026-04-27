@@ -32,7 +32,20 @@ public abstract class DeployerHandlerMixin {
                                                     CallbackInfo ci) {
         if (!(fakePlayer.level() instanceof ServerLevel level)) return;
 
-        UUID holderId = fakePlayer.getUUID();
+        // DeployerFakePlayer.getUUID() returns the *owner player's* UUID, which is shared
+        // by every deployer they placed.  If two deployers are on the same contraption their
+        // shared UUID causes each syncHolderLinks call to overwrite the other's registration,
+        // so only one instrument ever plays at a time.
+        //
+        // Fix: build a per-deployer-instance UUID by combining the owner UUID's top half
+        // with the Java identity hash of this specific fake player object.
+        // Each DeployerBlockEntity holds a single fake player instance (lazy-created once),
+        // so System.identityHashCode is stable for the lifetime of the deployer block entity.
+        UUID ownerId = fakePlayer.getUUID();
+        UUID holderId = new UUID(
+            ownerId.getMostSignificantBits(),
+            (long) System.identityHashCode(fakePlayer) & 0xFFFFFFFFL
+        );
 
         PolyphonyLinkManager.registerAutomationActivation(
             level,

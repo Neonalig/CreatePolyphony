@@ -83,7 +83,13 @@ public final class PolyphonyLinkManager {
     private static final Map<String, Set<UUID>> ACTIVE_MOB_HOLDERS_BY_LEVEL = new HashMap<>();
 
     private static final int MOB_SYNC_INTERVAL_TICKS = 10;
-    private static final int AUTOMATION_HOLDER_TTL_TICKS = 8;
+    /**
+     * How long after the last deployer activation before its channel-assignment slot is freed.
+     * This must be long enough to cover the slowest practical contraption rotation.
+     * 200 ticks ≈ 10 s, covering ~0.3 RPM and above with normal note durations.
+     * Expiry only removes channel-assignment; it never early-stops tracked notes.
+     */
+    private static final int AUTOMATION_HOLDER_TTL_TICKS = 200;
 
     private PolyphonyLinkManager() {}
 
@@ -223,6 +229,25 @@ public final class PolyphonyLinkManager {
             rememberChannelProgram(key, channel, data1 & 0x7F);
         }
 
+        int note     = data1 & 0x7F;
+        int velocity = data2 & 0x7F;
+        boolean noteOff = command == 0x80 || (command == 0x90 && velocity == 0);
+
+        // Service tracked NoteOffs BEFORE the link-existence check so that notes
+        // started by automation holders (deployers etc.) are properly stopped even
+        // after their TTL has expired and their link participation has been removed.
+        if (noteOff) {
+            UUID recordedOwner = consumeTrackedOwner(key, new ActiveNoteKey(channel, note));
+            if (recordedOwner != null) {
+                if (sendNotePacket(level, recordedOwner, 0, channel, 0x80, note, velocity)) {
+                    debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
+                } else {
+                    debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
+                }
+                return;
+            }
+        }
+
         PolyphonyLink link = get(level, pos);
         if (link == null || link.isEmpty()) {
             if (command == 0xC0) {
@@ -247,22 +272,11 @@ public final class PolyphonyLinkManager {
             return;
         }
 
-        int note = data1 & 0x7F;
-        int velocity = data2 & 0x7F;
-        boolean noteOff = command == 0x80 || velocity == 0;
+        // noteOff / note / velocity already computed above.
         ActiveNoteKey activeNoteKey = new ActiveNoteKey(channel, note);
 
-        if (noteOff) {
-            UUID recordedOwner = consumeTrackedOwner(key, activeNoteKey);
-            if (recordedOwner != null) {
-                if (sendNotePacket(level, recordedOwner, 0, channel, 0x80, note, velocity)) {
-                    debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
-                } else {
-                    debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
-                }
-                return;
-            }
-        }
+        // (Tracked NoteOff already handled above; this branch only reached if no prior
+        //  track entry existed — fall through to current-assignee delivery as normal.)
 
         PolyphonyLink.ChannelAssignee assignee = link.assigneeFor(channel);
         if (assignee == null) {
@@ -455,8 +469,32 @@ public final class PolyphonyLinkManager {
             if (entry.getValue().expiryTick() > now) continue;
             UUID holderId = entry.getKey();
             TRANSIENT_HOLDER_EXPIRY.remove(holderId);
-            // Pass the stored level so forceStopNotesOwnedBy can broadcast NoteOffs.
-            removeHolder(holderId, entry.getValue().level());
+            // Soft-expire: remove channel assignment but do NOT force-stop notes.
+            // Any in-flight notes are tracked in ACTIVE_NOTE_OWNERS; their NoteOffs
+            // will arrive from the MIDI sequencer and route correctly via consumeTrackedOwner.
+            removeHolderAssignmentOnly(holderId);
+        }
+    }
+
+    /**
+     * Removes a holder's channel-assignment participation without sending NoteOff packets.
+     * Used for TTL-based soft expiry of automation (deployer) holders.
+     * Contrast with {@link #removeHolder} which also force-stops all tracked notes.
+     */
+    private static void removeHolderAssignmentOnly(UUID holderId) {
+        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(holderId);
+        if (current == null) return;
+        for (LinkKey key : current.keySet()) {
+            PolyphonyLink link = LINKS.get(key);
+            if (link == null) continue;
+            link.removePlayer(holderId);
+            if (link.isEmpty()) {
+                LINKS.remove(key);
+                // Intentionally keep ACTIVE_NOTE_OWNERS entries alive: NoteOffs that
+                // arrive after the link goes empty still need to route to their owner
+                // (via consumeTrackedOwner in dispatchNote) to stop client synth voices.
+                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+            }
         }
     }
 
