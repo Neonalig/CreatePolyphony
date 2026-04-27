@@ -5,8 +5,10 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Logger;
 
 public final class SoundFont {
+    private static final Logger LOG = Logger.getLogger(SoundFont.class.getName());
     private SoundFontInfo info;
     private int bitsPerSample;
     private short[] waveData;
@@ -69,13 +71,13 @@ public final class SoundFont {
                 throw new IOException("The start position of the sample '" + sample.name() + "' is out of range.");
             }
             if (!(0 <= sample.startLoop() && sample.startLoop() < sampleCount)) {
-                throw new IOException("The loop start position of the sample '" + sample.name() + "' is out of range.");
+                LOG.warning("SoundFont: ignoring out-of-range loop start for sample '" + sample.name() + "' (value=" + sample.startLoop() + ", max=" + sampleCount + ")");
             }
             if (!(0 < sample.end() && sample.end() <= sampleCount)) {
                 throw new IOException("The end position of the sample '" + sample.name() + "' is out of range.");
             }
             if (!(0 <= sample.endLoop() && sample.endLoop() <= sampleCount)) {
-                throw new IOException("The loop end position of the sample '" + sample.name() + "' is out of range.");
+                LOG.warning("SoundFont: ignoring out-of-range loop end for sample '" + sample.name() + "' (value=" + sample.endLoop() + ", max=" + sampleCount + ")");
             }
         }
     }
@@ -88,17 +90,17 @@ public final class SoundFont {
                     throw new IOException("The start position of the sample '" + region.sample().name() + "' in the instrument '" + instrument.name() + "' is out of range.");
                 }
                 if (!(0 <= region.sampleStartLoop() && region.sampleStartLoop() < sampleCount)) {
-                    throw new IOException("The loop start position of the sample '" + region.sample().name() + "' in the instrument '" + instrument.name() + "' is out of range.");
+                    LOG.warning("SoundFont: ignoring out-of-range region loop start for sample '" + region.sample().name() + "' in '" + instrument.name() + "'");
                 }
                 if (!(0 < region.sampleEnd() && region.sampleEnd() <= sampleCount)) {
                     throw new IOException("The end position of the sample '" + region.sample().name() + "' in the instrument '" + instrument.name() + "' is out of range.");
                 }
                 if (!(0 <= region.sampleEndLoop() && region.sampleEndLoop() <= sampleCount)) {
-                    throw new IOException("The loop end position of the sample '" + region.sample().name() + "' in the instrument '" + instrument.name() + "' is out of range.");
+                    LOG.warning("SoundFont: ignoring out-of-range region loop end for sample '" + region.sample().name() + "' in '" + instrument.name() + "'");
                 }
                 LoopMode mode = region.sampleModes();
                 if (mode != LoopMode.NO_LOOP && mode != LoopMode.CONTINUOUS && mode != LoopMode.LOOP_UNTIL_NOTE_OFF) {
-                    throw new IOException("The sample '" + region.sample().name() + "' in the instrument '" + instrument.name() + "' has an invalid loop mode.");
+                    LOG.warning("SoundFont: unrecognised loop mode for sample '" + region.sample().name() + "' in '" + instrument.name() + "', treating as NO_LOOP");
                 }
             }
         }
