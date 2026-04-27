@@ -74,6 +74,12 @@
   "createpolyphony.configuration.adaptiveEwmaAlpha.tooltip": "Controller smoothing factor (0..1): lower = steadier, higher = more reactive.",
   "createpolyphony.configuration.synthSoundSource": "Synth Volume Slider",
   "createpolyphony.configuration.synthSoundSource.tooltip": "Chooses which Minecraft sound category controls instrument playback volume. Defaults to RECORDS.",
+  "createpolyphony.configuration.deployerPlaybackMode": "Deployer Playback Mode",
+  "createpolyphony.configuration.deployerPlaybackMode.tooltip": "Controls deployer automation playback behavior: CONTINUOUS_POWERED keeps holders active between interactions for smooth playback, while INTERACTION_ONLY only plays around full deploy interactions.",
+  "createpolyphony.configuration.deployerPlaybackMode.CONTINUOUS_POWERED": "Continuous While Powered",
+  "createpolyphony.configuration.deployerPlaybackMode.INTERACTION_ONLY": "Interaction Only",
+  "createpolyphony.configuration.deployerPlaybackMode.continuous_powered": "Continuous While Powered",
+  "createpolyphony.configuration.deployerPlaybackMode.interaction_only": "Interaction Only",
   "createpolyphony.configuration.oneManBandUseAllGmPrograms": "One Man Band Uses All GM Programs",
   "createpolyphony.configuration.oneManBandUseAllGmPrograms.tooltip": "When enabled, One Man Band plays raw GM programs (including synth lead, organ, etc). When disabled, it is limited to your explicitly supported instrument families."
 }

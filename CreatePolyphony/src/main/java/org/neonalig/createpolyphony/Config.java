@@ -60,7 +60,7 @@ public class Config {
         .comment("Controls deployer automation playback participation.",
             "CONTINUOUS_POWERED: keeps deployer holders active between interactions for smooth continuous playback while running.",
             "INTERACTION_ONLY: only keeps holders active briefly around deployer interaction ticks (hand fully deploys).")
-        .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.CONTINUOUS_POWERED);
+        .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.INTERACTION_ONLY);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
