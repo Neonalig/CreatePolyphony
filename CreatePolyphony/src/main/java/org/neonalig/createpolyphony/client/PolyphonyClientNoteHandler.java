@@ -2,166 +2,200 @@ package org.neonalig.createpolyphony.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.client.sounds.SoundManager;
-import net.minecraft.client.sounds.WeighedSoundEvents;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.sounds.SoundEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
+import org.neonalig.createpolyphony.CreatePolyphony;
+import org.neonalig.createpolyphony.client.sound.PolyphonySynthSoundInstance;
 import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
-import org.neonalig.createpolyphony.registry.CPSounds;
-import org.neonalig.createpolyphony.registry.CPSounds.OctaveSample;
+import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Client-side handler for {@link PlayInstrumentNotePayload}.
  *
- * <h2>Lifecycle</h2>
- * <p>Translates incoming server packets into client-side
- * {@link PolyphonyNoteSoundInstance}s, one per (channel, note) pair. Tracking
- * active notes lets us actually <em>stop</em> notes on note-off events,
- * rather than just letting the sample play to completion.</p>
+ * <h2>Architecture (post-synth refactor)</h2>
+ * <p>Previously this class translated each incoming MIDI event into a
+ * per-note sound effect from a resource pack. Now it forwards
+ * incoming events directly to a long-lived
+ * {@link PolyphonySynthesizer} which renders PCM in real time, and
+ * keeps a single {@link PolyphonySynthSoundInstance} alive to pipe that
+ * PCM through Minecraft's audio engine.</p>
  *
- * <h2>Resource pack tolerance</h2>
- * <p>Resource packs are <b>partial</b> by design: a piano-only pack will only
- * supply samples for GM program 1 (Acoustic Grand Piano), and is expected to
- * be silent for any other program. Before we hand a sound to the sound
- * manager we therefore call {@link SoundManager#getSoundEvent(ResourceLocation)};
- * a {@code null} return means no resource pack defined that id, so we
- * silently drop the note rather than spamming "Unable to play unknown
- * soundEvent" warnings into the log.</p>
+ * <p>Conceptually the handler is now a thin MIDI router:</p>
+ * <pre>{@code
+ *   server packet -> programChange / noteOn / noteOff -> Synth -> PCM ring -> AudioStream -> OpenAL
+ * }</pre>
  *
- * <h2>Octave anchors</h2>
- * <p>Each program has up to three sample anchors (C2/C4/C6, see
- * {@link OctaveSample}). For every NoteOn we pick the anchor closest to the
- * played note - giving us pitch shifts of at most one octave - and fall back
- * to the next-nearest anchor if the chosen one isn't defined in the active
- * resource pack.</p>
+ * <h2>Why one stream, not one per note</h2>
+ * <p>Each {@code SoundInstance} occupies an OpenAL source. A polyphonic
+ * MIDI track may have 30+ simultaneous notes; allocating that many
+ * sources per player would quickly exhaust OpenAL's limited pool
+ * (~256 voices total, shared across <i>all</i> Minecraft sounds). The
+ * synth handles polyphony internally on a single audio stream, so we
+ * use exactly one source per player regardless of how busy the track
+ * is.</p>
+ *
+ * <h2>Program-change tracking</h2>
+ * <p>Most MIDI files set the channel program once at the start and
+ * leave it. The server sends the program with every NoteOn anyway (so
+ * we don't need state to be authoritative on the server), and we
+ * de-dupe by tracking the last program assigned to each channel,
+ * issuing {@code programChange} to the synth only when it actually
+ * differs.</p>
  *
  * <h2>Threading</h2>
- * <p>All audio interaction happens on the client main thread. Network
- * decoding hands us off there via
- * {@link IPayloadContext#enqueueWork(Runnable)}; the {@link #ACTIVE} map is
- * therefore only ever touched from that thread and needs no synchronisation.</p>
+ * <p>{@link IPayloadContext#enqueueWork(Runnable)} hands us off to the
+ * client main thread, so all access to {@link #lastProgram} and the
+ * lazy synth init is single-threaded. {@link PolyphonySynthesizer}'s
+ * own MIDI entry points are documented as thread-safe, but going
+ * through the main thread also gives us deterministic ordering of
+ * NoteOn/NoteOff for the same channel.</p>
  */
 public final class PolyphonyClientNoteHandler {
 
     /**
-     * Active notes keyed by (channel, midi-note). MIDI allows the same note
-     * number to be on simultaneously across different channels, so the channel
-     * is part of the key. We do <em>not</em> let the same note retrigger on
-     * the same channel; a second NoteOn replaces the first (matching most GM
-     * synths).
+     * Last program known to be active on each MIDI channel (0-15). {@code -1}
+     * means "no program assigned yet"; the next NoteOn on that channel will
+     * always issue a {@link PolyphonySynthesizer#programChange(int, int)}.
      */
-    private static final Map<NoteKey, PolyphonyNoteSoundInstance> ACTIVE = new HashMap<>();
+    private static final int[] lastProgram = new int[16];
+
+    /** The single sound instance carrying our synth's PCM into OpenAL. */
+    private static PolyphonySynthSoundInstance activeStream = null;
+
+    /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
+    private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
+
+    static {
+        Arrays.fill(lastProgram, -1);
+    }
 
     private PolyphonyClientNoteHandler() {}
 
     /** Network entrypoint - safe to call on the network thread. */
     public static void handle(PlayInstrumentNotePayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> playOrStop(payload));
+        context.enqueueWork(() -> dispatch(payload));
     }
 
-    private static void playOrStop(PlayInstrumentNotePayload payload) {
+    private static void dispatch(PlayInstrumentNotePayload payload) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return;
 
-        NoteKey key = new NoteKey(payload.channel(), payload.note());
-
-        if (payload.isNoteOff()) {
-            PolyphonyNoteSoundInstance existing = ACTIVE.remove(key);
-            if (existing != null) existing.stopNote();
+        PolyphonySynthesizer synth = currentSynth();
+        if (synth == null) {
+            // No active soundfont selected (or synth boot failed) - silently drop.
+            // The user picked "None / No Sound" or hasn't picked anything yet.
+            debugNote("drop:no-synth", payload);
             return;
         }
 
-        if (!payload.isNoteOn()) {
-            // Defensive: PolyphonyLinkManager already filters to NoteOn/NoteOff,
-            // but if anything else arrives we just drop it.
-            return;
+        ensureStream(synth);
+        debugNote("recv", payload);
+
+        int channel = payload.channel() & 0x0F;
+        int note = payload.note() & 0x7F;
+        int velocity = payload.velocity() & 0x7F;
+        int program = payload.program() & 0x7F;
+
+        // Apply program change lazily: only when this channel hasn't seen this program before.
+        if (lastProgram[channel] != program) {
+            synth.programChange(channel, program);
+            lastProgram[channel] = program;
         }
 
-        // ---- NoteOn path -----------------------------------------------------------------------
-
-        // Stop any prior instance on the same (channel, note) so we don't stack samples.
-        PolyphonyNoteSoundInstance prior = ACTIVE.remove(key);
-        if (prior != null) prior.stopNote();
-
-        ResolvedSample sample = resolveSample(mc.getSoundManager(), payload.program(), payload.note());
-        if (sample == null) {
-            // No resource pack covers this (program, octave) - silently drop.
-            return;
+        if (payload.isNoteOn()) {
+            synth.noteOn(channel, note, velocity);
+            debugNote("note-on", payload);
+        } else if (payload.isNoteOff()) {
+            synth.noteOff(channel, note);
+            debugNote("note-off", payload);
         }
-
-        PolyphonyNoteSoundInstance instance = new PolyphonyNoteSoundInstance(
-            sample.event(),
-            payload.note(),
-            sample.anchor().midiBaseNote,
-            payload.velocity(),
-            player
-        );
-
-        ACTIVE.put(key, instance);
-        mc.getSoundManager().play(instance);
+        // Anything else (e.g. CC, pitch-bend) would be added here once the
+        // server-side packet payload grows to carry them.
     }
 
     /**
-     * Pick the best-available sample for {@code (program, midiNote)}.
-     *
-     * <p>The "best" anchor is the one closest to {@code midiNote} (smallest
-     * pitch shift). If that anchor isn't defined by the active resource
-     * pack(s), we fall back to the other two in increasing order of pitch
-     * distance. If none of the three are defined, we return {@code null} -
-     * meaning the resource pack hasn't supplied this program at all and the
-     * caller should silently skip.</p>
+     * Lazily start the streaming sound instance the first time we have
+     * something to play. Subsequent NoteOns just feed the running synth.
      */
-    private static ResolvedSample resolveSample(SoundManager sm, int program, int midiNote) {
-        OctaveSample[] order = anchorsByDistance(midiNote);
-        for (OctaveSample anchor : order) {
-            ResourceLocation id = CPSounds.locationFor(program, anchor);
-            if (id == null) continue; // out-of-range program
-            WeighedSoundEvents defined = sm.getSoundEvent(id);
-            if (defined == null) continue; // no pack defines this id
-            SoundEvent ev = CPSounds.eventFor(program, anchor);
-            if (ev != null) return new ResolvedSample(ev, anchor);
-        }
-        return null;
-    }
-
-    /**
-     * Return the three octave anchors sorted by ascending distance from
-     * {@code midiNote}. Allocates a small fixed-size array per call; that's
-     * cheap enough on the note-on hot path (a few notes/sec at most for a
-     * typical MIDI track).
-     */
-    private static OctaveSample[] anchorsByDistance(int midiNote) {
-        OctaveSample[] all = OctaveSample.values();
-        OctaveSample[] sorted = all.clone();
-        // Simple insertion sort - 3 elements, no need for Arrays.sort overhead.
-        for (int i = 1; i < sorted.length; i++) {
-            OctaveSample x = sorted[i];
-            int xd = Math.abs(midiNote - x.midiBaseNote);
-            int j = i - 1;
-            while (j >= 0 && Math.abs(midiNote - sorted[j].midiBaseNote) > xd) {
-                sorted[j + 1] = sorted[j];
-                j--;
+    private static void ensureStream(PolyphonySynthesizer synth) {
+        if (activeStream != null && !activeStream.isStopped()) {
+            // Keep handler state aligned with the real SoundEngine channel state.
+            // If OpenAL/SoundEngine dropped the channel, recreate on next packet.
+            if (Minecraft.getInstance().getSoundManager().isActive(activeStream)) {
+                return;
             }
-            sorted[j + 1] = x;
+            debugStream("restart:inactive");
+            activeStream = null;
         }
-        return sorted;
+        // Either we never started one, or the previous stream got stopped
+        // (synth swap, world change). Start a fresh instance.
+        activeStream = new PolyphonySynthSoundInstance(synth);
+        debugStream("start");
+        Minecraft.getInstance().getSoundManager().play(activeStream);
     }
 
     /**
-     * Stop every active note. Called on disconnect / world unload to make sure
-     * we don't leak stuck notes between worlds.
+     * Stop every active note and retire the streaming sound. Called on
+     * disconnect / world unload to make sure we don't leak voices or audio
+     * sources between worlds.
      */
     public static void stopAll() {
-        for (PolyphonyNoteSoundInstance ins : ACTIVE.values()) ins.stopNote();
-        ACTIVE.clear();
+        Arrays.fill(lastProgram, -1);
+        PolyphonySynthesizer synth = currentSynth();
+        if (synth != null) {
+            try { synth.allNotesOff(); } catch (Throwable t) {
+                CreatePolyphony.LOGGER.warn("allNotesOff failed during stopAll()", t);
+            }
+        }
+        if (activeStream != null) {
+            activeStream.stopInstance();
+            activeStream = null;
+        }
     }
 
-    private record NoteKey(int channel, int note) { }
+    // ---- Synth lookup ------------------------------------------------------------------------
 
-    private record ResolvedSample(SoundEvent event, OctaveSample anchor) { }
+    /**
+     * The current active synthesizer, or {@code null} if no soundfont is
+     * loaded. The {@link org.neonalig.createpolyphony.client.sound SoundFontManager}
+     * (registered in a later setup hook) replaces this hook to point at
+     * its own state. Keeping the lookup behind a function pointer means
+     * this handler doesn't import the manager and can be tested in
+     * isolation.
+     */
+    private static volatile java.util.function.Supplier<PolyphonySynthesizer> synthSupplier = () -> null;
+
+    public static void setSynthSupplier(java.util.function.Supplier<PolyphonySynthesizer> supplier) {
+        synthSupplier = supplier == null ? () -> null : supplier;
+    }
+
+    private static PolyphonySynthesizer currentSynth() {
+        try {
+            return synthSupplier.get();
+        } catch (Throwable t) {
+            CreatePolyphony.LOGGER.error("synthSupplier threw", t);
+            return null;
+        }
+    }
+
+    private static void debugNote(String phase, PlayInstrumentNotePayload payload) {
+        if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
+        if (NOTE_DEBUG_BUDGET.getAndDecrement() <= 0) return;
+        CreatePolyphony.LOGGER.debug(
+            "client:{} st=0x{} ch={} note={} vel={} prog={}",
+            phase,
+            Integer.toHexString(payload.command() & 0xFF),
+            payload.channel() & 0x0F,
+            payload.note() & 0x7F,
+            payload.velocity() & 0x7F,
+            payload.program() & 0x7F);
+    }
+
+    private static void debugStream(String phase) {
+        if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;
+        CreatePolyphony.LOGGER.debug("client:stream:{}", phase);
+    }
 }

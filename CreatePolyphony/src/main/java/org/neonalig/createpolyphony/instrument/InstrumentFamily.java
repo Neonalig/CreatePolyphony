@@ -120,6 +120,24 @@ public enum InstrumentFamily {
         return forGmProgram(gmProgram);
     }
 
+    /**
+     * Canonical GM program to use when we intentionally force playback to this
+     * held instrument family.
+     */
+    public int canonicalGmProgram() {
+        return switch (this) {
+            case PIANO -> 0;            // Acoustic Grand Piano
+            case ACOUSTIC_GUITAR -> 24; // Acoustic Guitar (nylon)
+            case ELECTRIC_GUITAR -> 27; // Electric Guitar (clean)
+            case BASS_GUITAR -> 33;     // Electric Bass (finger)
+            case VIOLIN -> 40;          // Violin
+            case TRUMPET -> 56;         // Trumpet
+            case FLUTE -> 73;           // Flute
+            case ACCORDION -> 21;       // Accordion
+            case DRUM_KIT -> 127;       // Channel 10 drum kit sentinel
+        };
+    }
+
     /** Convenience: case-insensitive lookup by {@link #getId()}. */
     public static InstrumentFamily byId(String id) {
         for (var f : values()) {

@@ -9,7 +9,6 @@ import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import org.neonalig.createpolyphony.registry.CPCreativeTabs;
 import org.neonalig.createpolyphony.registry.CPItems;
 import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
-import org.neonalig.createpolyphony.registry.CPSounds;
 import org.slf4j.Logger;
 
 /**
@@ -36,7 +35,6 @@ public final class CreatePolyphony {
         // Register deferred-register holders to the mod event bus so the
         // game knows about our items and creative tab.
         CPItems.register(modEventBus);
-        CPSounds.register(modEventBus);
         CPCreativeTabs.register(modEventBus);
         CPRecipeSerializers.register(modEventBus);
 
@@ -45,6 +43,16 @@ public final class CreatePolyphony {
 
         // Keep the legacy config registered so existing run/ data stays valid.
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
+
+        // Expose a config UI factory so the NeoForge mods list enables the Config button.
+        try {
+            Class<?> bootstrap = Class.forName("org.neonalig.createpolyphony.client.PolyphonyClientBootstrap");
+            bootstrap.getMethod("registerConfigScreen", ModContainer.class).invoke(null, modContainer);
+        } catch (ClassNotFoundException ignored) {
+            // Dedicated server / datagen path: client bootstrap is absent or not loadable.
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to register client config screen extension point", t);
+        }
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

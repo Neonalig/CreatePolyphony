@@ -5,6 +5,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import org.neonalig.createpolyphony.CreatePolyphony;
+import org.neonalig.createpolyphony.client.sound.SoundFontManager;
 
 /**
  * Client-only lifecycle hooks that keep our active-note bookkeeping clean
@@ -13,10 +14,8 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  * <p>Without these, a stuck note from one world (e.g. you got teleported,
  * disconnected, or quit-to-title mid-NoteOn) could survive into the next
  * world via the active-notes table inside {@link PolyphonyClientNoteHandler}.
- * We don't actually leak the {@link PolyphonyNoteSoundInstance}s themselves
- * (the sound engine drops them on world change), but stale entries in that
- * table would prevent the same (channel, note) from re-triggering until they
- * happened to receive a NoteOff. {@link PolyphonyClientNoteHandler#stopAll()}
+ * Stale program/channel state in that handler would prevent clean retriggering
+ * until matching NoteOff packets arrived. {@link PolyphonyClientNoteHandler#stopAll()}
  * clears it.</p>
  */
 @SuppressWarnings("removal") // EventBusSubscriber.Bus deprecation: see CPNetwork for context.
@@ -34,5 +33,7 @@ public final class PolyphonyClientLifecycle {
     public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         // Defensive - in case a connection failed mid-NoteOn before LoggingOut fired.
         PolyphonyClientNoteHandler.stopAll();
+        // Ensure persisted soundfont selection is restored before first incoming note packet.
+        SoundFontManager.get();
     }
 }
