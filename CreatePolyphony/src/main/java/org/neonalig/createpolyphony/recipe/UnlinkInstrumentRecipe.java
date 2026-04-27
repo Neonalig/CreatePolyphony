@@ -22,12 +22,12 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
 
     @Override
     public boolean matches(CraftingInput input, Level level) {
-        return findOnlyStack(input) != null;
+        return findLinkedInstrument(input) != null;
     }
 
     @Override
     public ItemStack assemble(CraftingInput input, HolderLookup.Provider registries) {
-        ItemStack source = findOnlyStack(input);
+        ItemStack source = findLinkedInstrument(input);
         if (source == null) return ItemStack.EMPTY;
 
         ItemStack output = source.copyWithCount(1);
@@ -41,11 +41,22 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
     }
 
     @Override
+    public boolean isIncomplete() {
+        // Custom recipes intentionally have no ingredient list; they are matched in code.
+        return false;
+    }
+
+    @Override
     public RecipeSerializer<?> getSerializer() {
         return CPRecipeSerializers.UNLINK_INSTRUMENT.get();
     }
 
-    private static ItemStack findOnlyStack(CraftingInput input) {
+    /**
+     * Finds the only linked instrument in the crafting grid.
+     * Requires exactly one non-empty slot containing a linked instrument.
+     * The instrument can be placed in any position.
+     */
+    private static ItemStack findLinkedInstrument(CraftingInput input) {
         ItemStack found = ItemStack.EMPTY;
         for (int i = 0; i < input.size(); i++) {
             ItemStack stack = input.getItem(i);
@@ -65,4 +76,3 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
         return found.isEmpty() ? null : found;
     }
 }
-

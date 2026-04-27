@@ -24,4 +24,3 @@ public final class CPRecipeSerializers {
 
     private CPRecipeSerializers() {}
 }
-
