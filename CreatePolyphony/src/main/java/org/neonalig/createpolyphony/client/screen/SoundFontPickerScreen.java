@@ -31,7 +31,7 @@ public final class SoundFontPickerScreen extends Screen {
     /** Pixel height of the dark header panel (title + search bar). */
     private static final int HEADER_H = 54;
     /** Pixel height of the dark footer panel (loading info + buttons). */
-    private static final int FOOTER_H = 60;
+    private static final int FOOTER_H = 90;
 
     private final SoundFontManager manager;
     private final Consumer<SoundFontManager> managerListener;
@@ -128,12 +128,17 @@ public final class SoundFontPickerScreen extends Screen {
         list.rebuildAll(manager.available(), currentFilter);
 
         SoundFontList.Entry toSelect = null;
+
+        // Prioritize the currently active soundfont
+        String active = manager.active();
         for (SoundFontList.Entry entry : list.children()) {
-            if (Objects.equals(entry.fileName, selectedName)) {
+            if (Objects.equals(entry.fileName, active)) {
                 toSelect = entry;
                 break;
             }
         }
+
+        // If no active match, try pending (loading)
         if (toSelect == null) {
             String pending = manager.pending();
             for (SoundFontList.Entry entry : list.children()) {
@@ -143,15 +148,18 @@ public final class SoundFontPickerScreen extends Screen {
                 }
             }
         }
+
+        // If no pending match, try previously selected
         if (toSelect == null) {
-            String active = manager.active();
             for (SoundFontList.Entry entry : list.children()) {
-                if (Objects.equals(entry.fileName, active)) {
+                if (Objects.equals(entry.fileName, selectedName)) {
                     toSelect = entry;
                     break;
                 }
             }
         }
+
+        // If still nothing, select first entry
         if (toSelect == null && !list.children().isEmpty()) {
             toSelect = list.children().get(0);
         }
@@ -162,7 +170,15 @@ public final class SoundFontPickerScreen extends Screen {
     private void updateControlState() {
         boolean loading = manager.isLoading();
         boolean hasSelection = list != null && list.getSelected() != null;
-        setActiveButton.active = !loading && hasSelection;
+
+        // Disable "Set Active" if already active or if the selected entry is the active soundfont
+        boolean isAlreadyActive = false;
+        if (hasSelection) {
+            String selectedFileName = list.getSelected().fileName;
+            isAlreadyActive = Objects.equals(selectedFileName, manager.active());
+        }
+
+        setActiveButton.active = !loading && hasSelection && !isAlreadyActive;
         openFolderButton.active = !loading;
         refreshButton.active = !loading;
         panicButton.active = !loading;
@@ -188,8 +204,6 @@ public final class SoundFontPickerScreen extends Screen {
         guiGraphics.fill(0, 0, this.width, this.listTop, 0xFF1A1A1A);
         guiGraphics.fill(0, this.listBottom, this.width, this.height, 0xFF1A1A1A);
 
-        guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 10, 0xFFFFFF);
-
         // Loading progress bar shown in the footer above the buttons
         if (manager.isLoading()) {
             String pending = manager.pending();
@@ -209,6 +223,9 @@ public final class SoundFontPickerScreen extends Screen {
         }
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
+
+        // Draw title last so it appears on top of everything, not blurred by background
+        guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 10, 0xFFFFFF);
     }
 
     @Override
@@ -239,6 +256,8 @@ public final class SoundFontPickerScreen extends Screen {
             @Nullable String prevSelected = selectedName();
             currentFilter = filter == null ? "" : filter;
             applyFilter();
+            // Reset scroll to top so filtered results are visible
+            this.setScrollAmount(0.0);
             // Restore the previously selected entry if it is still visible
             for (SoundFontList.Entry entry : children()) {
                 if (Objects.equals(entry.fileName, prevSelected)) {
