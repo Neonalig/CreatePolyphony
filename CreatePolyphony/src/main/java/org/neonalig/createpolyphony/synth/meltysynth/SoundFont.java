@@ -6,6 +6,7 @@ import java.io.RandomAccessFile;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
+import java.util.function.IntConsumer;
 
 public final class SoundFont {
     private static final Logger LOG = Logger.getLogger(SoundFont.class.getName());
@@ -23,11 +24,20 @@ public final class SoundFont {
             throw new IllegalArgumentException("file must not be null");
         }
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
-            load(raf);
+            load(raf, null);
         }
     }
 
-    private void load(RandomAccessFile reader) throws IOException {
+    public SoundFont(File file, IntConsumer progressCallback) throws IOException {
+        if (file == null) {
+            throw new IllegalArgumentException("file must not be null");
+        }
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            load(raf, progressCallback);
+        }
+    }
+
+    private void load(RandomAccessFile reader, IntConsumer progressCallback) throws IOException {
         String chunkId = BinaryReaderEx.readFourCC(reader);
         if (!"RIFF".equals(chunkId)) {
             throw new IOException("The RIFF chunk was not found.");
@@ -39,7 +49,7 @@ public final class SoundFont {
         }
 
         info = new SoundFontInfo(reader);
-        SoundFontSampleData sampleData = new SoundFontSampleData(reader);
+        SoundFontSampleData sampleData = new SoundFontSampleData(reader, progressCallback);
         bitsPerSample = sampleData.bitsPerSample();
         waveData = sampleData.samples();
         SoundFontParameters parameters = new SoundFontParameters(reader);

@@ -6,6 +6,7 @@ import org.neonalig.createpolyphony.synth.meltysynth.MeltySynthEngine;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.function.IntConsumer;
 
 /**
  * The mod's real-time SoundFont (.sf2) synthesizer adapter.
@@ -49,6 +50,14 @@ public final class PolyphonySynthesizer {
      */
     public void loadSoundFont(File sf2File) throws IOException {
         MeltySoundFont bank = MeltySoundFont.load(sf2File);
+        engine.loadSoundFont(bank);
+        CreatePolyphony.LOGGER.info(
+            "Loaded soundfont {} ({} presets, {} instruments, {} samples)",
+            sf2File.getName(), bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
+    }
+
+    public void loadSoundFont(File sf2File, IntConsumer progressCallback) throws IOException {
+        MeltySoundFont bank = MeltySoundFont.load(sf2File, progressCallback);
         engine.loadSoundFont(bank);
         CreatePolyphony.LOGGER.info(
             "Loaded soundfont {} ({} presets, {} instruments, {} samples)",

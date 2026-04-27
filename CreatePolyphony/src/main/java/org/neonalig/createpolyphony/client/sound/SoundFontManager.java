@@ -114,7 +114,7 @@ public final class SoundFontManager {
     private volatile boolean closed = false;
     private volatile boolean loading = false;
     @Nullable private volatile String pendingName = null;
-    private volatile long loadStartedAtNanos = 0L;
+    private final AtomicInteger loadProgressPercent = new AtomicInteger(0);
 
     private SoundFontManager(Path directory, @Nullable PolyphonySynthesizer synth) throws IOException {
         this.directory = directory;
@@ -225,11 +225,7 @@ public final class SoundFontManager {
      */
     public float loadingProgress01() {
         if (!loading) return 1.0F;
-        long started = loadStartedAtNanos;
-        if (started <= 0L) return 0.05F;
-        double elapsedSec = (System.nanoTime() - started) / 1_000_000_000.0;
-        double eased = 1.0 - Math.exp(-elapsedSec / 1.8);
-        return (float) Math.max(0.05, Math.min(0.92, eased));
+        return loadProgressPercent.get() / 100f;
     }
 
     public boolean synthesisAvailable() {
@@ -292,7 +288,7 @@ public final class SoundFontManager {
         final int generation = loadGeneration.incrementAndGet();
         loading = true;
         pendingName = fileName;
-        loadStartedAtNanos = System.nanoTime();
+        loadProgressPercent.set(0);
         activeName = null;
         PolyphonyClientNoteHandler.panic();
         notifyListeners();
@@ -300,7 +296,7 @@ public final class SoundFontManager {
         CreatePolyphony.LOGGER.info("Async loading soundfont {}...", fileName);
         activeLoadTask = loadExecutor.submit(() -> {
             try {
-                synth.loadSoundFont(target.toFile());
+                synth.loadSoundFont(target.toFile(), loadProgressPercent::set);
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, true, null));
             } catch (IOException ex) {
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, ex));
@@ -318,7 +314,7 @@ public final class SoundFontManager {
         loadGeneration.incrementAndGet();
         loading = false;
         pendingName = null;
-        loadStartedAtNanos = 0L;
+        loadProgressPercent.set(0);
         PolyphonyClientNoteHandler.panic();
         if (synth != null) synth.unloadSoundFont();
         activeName = null;
@@ -353,11 +349,9 @@ public final class SoundFontManager {
         }
         loading = false;
         pendingName = null;
-        loadStartedAtNanos = 0L;
-        notifyListeners();
+        loadProgressPercent.set(0);
     }
 
-    /** Force a directory rescan and notify listeners. Cheap (just a directory listing). */
     public void rescan() {
         rescanInternal();
         notifyListeners();
