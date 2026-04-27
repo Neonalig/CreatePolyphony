@@ -68,8 +68,8 @@ public final class PolyphonyServerCommands {
             count++;
         }
 
-        final int notifiedPlayers = count;
-        source.sendSuccess(() -> Component.translatable("command.createpolyphony.panic.success", notifiedPlayers), true);
+        String msg = "Panic broadcast sent to " + count + " linked players.";
+        source.sendSuccess(() -> Component.literal(msg), true);
         return 1;
     }
 }

@@ -149,7 +149,9 @@ public final class SoundFontPickerScreen extends Screen {
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(guiGraphics, mouseX, mouseY, partialTick);
-        super.render(guiGraphics, mouseX, mouseY, partialTick);
+        if (list != null) {
+            list.render(guiGraphics, mouseX, mouseY, partialTick);
+        }
 
         guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
         if (manager.isLoading()) {
@@ -173,6 +175,8 @@ public final class SoundFontPickerScreen extends Screen {
             this.height - 48,
             0xA0A0A0,
             false);
+
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
     @Override
