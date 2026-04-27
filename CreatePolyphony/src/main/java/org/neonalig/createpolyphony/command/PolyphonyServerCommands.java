@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.command;
+package org.neonalig.createpolyphony.command;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
