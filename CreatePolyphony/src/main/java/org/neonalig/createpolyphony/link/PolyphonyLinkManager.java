@@ -75,8 +75,10 @@ public final class PolyphonyLinkManager {
     private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
-    /** Expiration tick for transient automation holders (deployer interactions, depot/ground stack targets). */
-    private static final Map<UUID, Long> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
+    /** Expiration state for transient automation holders (deployer interactions, depot/ground stack targets). */
+    private static final Map<UUID, TransientHolderState> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
+
+    private record TransientHolderState(ServerLevel level, long expiryTick) {}
     /** Snapshot of currently synced mob holders per level for cheap stale-holder cleanup. */
     private static final Map<String, Set<UUID>> ACTIVE_MOB_HOLDERS_BY_LEVEL = new HashMap<>();
 
@@ -129,7 +131,7 @@ public final class PolyphonyLinkManager {
 
     /** Reconcile active link membership from linked instruments in main/off hand. */
     public static void syncPlayerHeldLinks(ServerPlayer player) {
-        syncHolderLinks(player.getUUID(), desiredHeldLinks(player));
+        syncHolderLinks(player.getUUID(), desiredHeldLinks(player), slFrom(player));
     }
 
     /** Called from level ticks: refresh mob holders and retire transient automation holders. */
@@ -143,10 +145,18 @@ public final class PolyphonyLinkManager {
     /** Remove all link participation state for a non-player holder that left the level. */
     public static void onNonPlayerHolderRemoved(UUID holderId) {
         if (holderId == null) return;
-        if (ACTIVE_HAND_LINKS.containsKey(holderId)) {
-            removeHolder(holderId, null);
-        }
-        TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+        TransientHolderState state = TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+        removeHolder(holderId, state != null ? state.level() : null);
+    }
+
+    /** Send all-notes-off to a player and clear their note-ownership entries (used on dimension change). */
+    public static void onPlayerChangedDimension(ServerPlayer player) {
+        // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
+        PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0));
+        // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
+        UUID id = player.getUUID();
+        ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
+        ACTIVE_NOTE_OWNERS.entrySet().removeIf(e -> e.getValue().isEmpty());
     }
 
     /**
@@ -176,9 +186,8 @@ public final class PolyphonyLinkManager {
         }
 
         if (desired.isEmpty()) return;
-        syncHolderLinks(holderId, desired);
-        long now = currentServerTick(level.getServer());
-        TRANSIENT_HOLDER_EXPIRY.put(holderId, now + AUTOMATION_HOLDER_TTL_TICKS);
+        syncHolderLinks(holderId, desired, level);
+        TRANSIENT_HOLDER_EXPIRY.put(holderId, new TransientHolderState(level, currentServerTick(level.getServer()) + AUTOMATION_HOLDER_TTL_TICKS));
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */
@@ -351,24 +360,29 @@ public final class PolyphonyLinkManager {
         return owner;
     }
 
-    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID playerId) {
+    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID holderId) {
         Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
         if (level != null) {
-            ServerPlayer target = level.getServer().getPlayerList().getPlayer(playerId);
-            if (target != null) {
-                for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
-                    if (!playerId.equals(entry.getValue())) continue;
-                    ActiveNoteKey active = entry.getKey();
-                    PacketDistributor.sendToPlayer(target,
-                        new PlayInstrumentNotePayload(0, active.channel(), 0x80, active.note(), 0));
-                    byNote.remove(active);
+            ServerPlayer directPlayer = level.getServer().getPlayerList().getPlayer(holderId);
+            for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+                if (!holderId.equals(entry.getValue())) continue;
+                ActiveNoteKey active = entry.getKey();
+                PlayInstrumentNotePayload stop = new PlayInstrumentNotePayload(0, active.channel(), 0x80, active.note(), 0);
+                if (directPlayer != null) {
+                    PacketDistributor.sendToPlayer(directPlayer, stop);
+                } else {
+                    // Non-player holder (deployer, mob): broadcast stop to all level players.
+                    for (ServerPlayer watcher : level.players()) {
+                        PacketDistributor.sendToPlayer(watcher, stop);
+                    }
                 }
+                byNote.remove(active);
             }
         }
 
-        byNote.values().removeIf(playerId::equals);
+        byNote.values().removeIf(holderId::equals);
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
@@ -377,12 +391,14 @@ public final class PolyphonyLinkManager {
         return player.level() instanceof ServerLevel sl ? sl : null;
     }
 
-    private static void syncHolderLinks(UUID holderId, Map<LinkKey, HeldInstruments> desired) {
+    private static void syncHolderLinks(UUID holderId, Map<LinkKey, HeldInstruments> desired, @Nullable ServerLevel levelHint) {
         Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.get(holderId);
 
         if (current != null) {
             for (LinkKey key : Set.copyOf(current.keySet())) {
                 if (desired.containsKey(key)) continue;
+                // Send NoteOff for any notes this holder has in flight before removing them.
+                forceStopNotesOwnedBy(levelHint, key, holderId);
                 PolyphonyLink link = LINKS.get(key);
                 if (link != null) {
                     link.removePlayer(holderId);
@@ -435,11 +451,12 @@ public final class PolyphonyLinkManager {
     private static void pruneExpiredTransientHolders(ServerLevel level) {
         if (TRANSIENT_HOLDER_EXPIRY.isEmpty()) return;
         long now = currentServerTick(level.getServer());
-        for (Map.Entry<UUID, Long> entry : Map.copyOf(TRANSIENT_HOLDER_EXPIRY).entrySet()) {
-            if (entry.getValue() > now) continue;
+        for (Map.Entry<UUID, TransientHolderState> entry : Map.copyOf(TRANSIENT_HOLDER_EXPIRY).entrySet()) {
+            if (entry.getValue().expiryTick() > now) continue;
             UUID holderId = entry.getKey();
             TRANSIENT_HOLDER_EXPIRY.remove(holderId);
-            removeHolder(holderId, null);
+            // Pass the stored level so forceStopNotesOwnedBy can broadcast NoteOffs.
+            removeHolder(holderId, entry.getValue().level());
         }
     }
 
@@ -457,13 +474,13 @@ public final class PolyphonyLinkManager {
             if (desired.isEmpty()) continue;
 
             UUID holderId = mob.getUUID();
-            syncHolderLinks(holderId, desired);
+            syncHolderLinks(holderId, desired, level);
             seen.add(holderId);
         }
 
         for (UUID stale : previous) {
             if (seen.contains(stale)) continue;
-            removeHolder(stale, null);
+            removeHolder(stale, level);
         }
 
         if (seen.isEmpty()) {

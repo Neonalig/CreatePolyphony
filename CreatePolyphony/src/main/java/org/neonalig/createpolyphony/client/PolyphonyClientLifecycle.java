@@ -36,4 +36,13 @@ public final class PolyphonyClientLifecycle {
         // Ensure persisted soundfont selection is restored before first incoming note packet.
         SoundFontManager.get();
     }
+
+    /**
+     * Fired when the local player entity is recreated on the client (dimension travel, respawn).
+     * Clears any in-flight notes so dimension transitions and deaths don't leave drones.
+     */
+    @SubscribeEvent
+    public static void onPlayerClone(ClientPlayerNetworkEvent.Clone event) {
+        PolyphonyClientNoteHandler.stopAll();
+    }
 }
