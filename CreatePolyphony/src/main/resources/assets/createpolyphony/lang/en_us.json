@@ -10,6 +10,7 @@
   "item.createpolyphony.flute": "Flute",
   "item.createpolyphony.accordion": "Accordion",
   "item.createpolyphony.drum_kit": "Drum Kit",
+  "item.createpolyphony.one_man_band": "One Man Band",
   "item.createpolyphony.linked_name": "%s @ %s",
 
   "instrument.createpolyphony.piano": "Piano",
@@ -21,6 +22,7 @@
   "instrument.createpolyphony.flute": "Flute",
   "instrument.createpolyphony.accordion": "Accordion",
   "instrument.createpolyphony.drum_kit": "Drum Kit",
+  "instrument.createpolyphony.one_man_band": "One Man Band",
 
   "tooltip.createpolyphony.instrument.hint": "Right-click a Tracker Bar to link",
   "tooltip.createpolyphony.instrument.hint.unlink": "Right-click the Tracker Bar again to unlink",

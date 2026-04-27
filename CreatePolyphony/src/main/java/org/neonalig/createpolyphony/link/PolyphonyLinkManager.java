@@ -218,16 +218,27 @@ public final class PolyphonyLinkManager {
         }
 
         // Safety belt: even if assignment data got stale, keep drums isolated.
-        if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
-            debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assignee);
-            return;
-        }
-        if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
-            debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assignee);
-            return;
+        // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
+        if (!family.isWildcard()) {
+            if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
+                debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assignee);
+                return;
+            }
+            if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
+                debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assignee);
+                return;
+            }
         }
 
-        int program = (channel == 9) ? 127 : family.canonicalGmProgram();
+        // ONE_MAN_BAND uses the actual MIDI channel program to play every instrument
+        // exactly as the MIDI file intended. All other instruments use their canonical
+        // family program so playback timbre reflects the held item.
+        int program;
+        if (family.isWildcard()) {
+            program = link.channelProgram(channel);
+        } else {
+            program = (channel == 9) ? 127 : family.canonicalGmProgram();
+        }
 
         PacketDistributor.sendToPlayer(target,
              new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
