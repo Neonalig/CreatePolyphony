@@ -3,7 +3,10 @@ package org.neonalig.createpolyphony.mixin;
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import org.neonalig.createpolyphony.instrument.InstrumentItem;
+import org.neonalig.createpolyphony.link.PolyphonyAdvancementGrants;
 import org.neonalig.createpolyphony.link.PolyphonyLinkManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -54,6 +57,14 @@ public abstract class DeployerHandlerMixin {
             targetPos,
             center
         );
+
+        if (!(fakePlayer.getMainHandItem().getItem() instanceof InstrumentItem)) {
+            return;
+        }
+        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerId);
+        if (owner == null) return;
+        PolyphonyAdvancementGrants.grantForHeldInstrument(owner, fakePlayer.getMainHandItem());
+        PolyphonyAdvancementGrants.grantDeployerEncore(owner);
     }
 }
 
