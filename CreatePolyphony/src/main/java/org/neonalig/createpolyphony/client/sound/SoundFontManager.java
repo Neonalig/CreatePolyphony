@@ -89,8 +89,8 @@ public final class SoundFontManager {
     private final Path directory;
     private final Path selectionFile;
 
-    /** Always non-null after construction; reused across all soundfont swaps. */
-    private final PolyphonySynthesizer synth;
+    /** Reused across soundfont swaps when available; may be null if synth bootstrap failed. */
+    @Nullable private final PolyphonySynthesizer synth;
 
     /** Currently-active filename inside {@link #directory}, or {@code null} for "None". */
     @Nullable private volatile String activeName;
@@ -105,7 +105,7 @@ public final class SoundFontManager {
     private final Thread watchThread;
     private volatile boolean closed = false;
 
-    private SoundFontManager(Path directory, PolyphonySynthesizer synth) throws IOException {
+    private SoundFontManager(Path directory, @Nullable PolyphonySynthesizer synth) throws IOException {
         this.directory = directory;
         this.selectionFile = directory.resolve(SELECTION_FILE);
         this.synth = synth;
@@ -135,12 +135,19 @@ public final class SoundFontManager {
         try {
             Path dir = resolveSoundFontDir();
             Files.createDirectories(dir);
-            SynthSettings settings = Config.synthSettings();
-            PolyphonySynthesizer synth = new PolyphonySynthesizer(settings);
+            PolyphonySynthesizer synth = null;
+            try {
+                SynthSettings settings = Config.synthSettings();
+                synth = new PolyphonySynthesizer(settings);
+            } catch (Throwable synthError) {
+                CreatePolyphony.LOGGER.error(
+                    "Sound synthesis backend unavailable; UI and soundfont selection will stay available but note playback is disabled until startup flags are fixed.",
+                    synthError);
+            }
             SoundFontManager mgr = new SoundFontManager(dir, synth);
 
             // Wire the note handler to query us for the synth.
-            PolyphonyClientNoteHandler.setSynthSupplier(() -> mgr.activeName == null ? null : mgr.synth);
+            PolyphonyClientNoteHandler.setSynthSupplier(mgr::activeSynth);
 
             // Restore last selection, if any.
             mgr.loadSelectionFromDisk();
@@ -186,6 +193,10 @@ public final class SoundFontManager {
         return activeName == null ? null : synth;
     }
 
+    public boolean synthesisAvailable() {
+        return synth != null;
+    }
+
     public void addListener(Consumer<SoundFontManager> listener) {
         listeners.add(Objects.requireNonNull(listener));
     }
@@ -205,7 +216,7 @@ public final class SoundFontManager {
     public boolean setActive(@Nullable String fileName) {
         if (fileName == null) {
             // "None" - retire any currently-loaded patches and stop playing voices.
-            synth.unloadSoundFont();
+            if (synth != null) synth.unloadSoundFont();
             activeName = null;
             persistSelection();
             notifyListeners();
@@ -224,7 +235,13 @@ public final class SoundFontManager {
             return false;
         }
         try {
-            synth.loadSoundFont(target.toFile());
+            if (synth != null) {
+                synth.loadSoundFont(target.toFile());
+            } else {
+                CreatePolyphony.LOGGER.warn(
+                    "Selected soundfont {}, but synth backend is unavailable so playback remains muted.",
+                    fileName);
+            }
             activeName = fileName;
             persistSelection();
             notifyListeners();
@@ -258,7 +275,7 @@ public final class SoundFontManager {
         String cur = activeName;
         if (cur != null && !found.contains(cur)) {
             CreatePolyphony.LOGGER.info("Active soundfont {} was removed; reverting to None", cur);
-            synth.unloadSoundFont();
+            if (synth != null) synth.unloadSoundFont();
             activeName = null;
             persistSelection();
         }
@@ -342,7 +359,9 @@ public final class SoundFontManager {
         closed = true;
         try { watchService.close(); } catch (IOException ignored) { }
         try { watchThread.interrupt(); } catch (Throwable ignored) { }
-        try { synth.close(); } catch (Throwable ignored) { }
+        if (synth != null) {
+            try { synth.close(); } catch (Throwable ignored) { }
+        }
         if (INSTANCE == this) INSTANCE = null;
     }
 }

@@ -35,5 +35,15 @@
   "screen.createpolyphony.soundfont.set_active": "Set Active",
   "screen.createpolyphony.soundfont.open_folder": "Open Folder",
   "screen.createpolyphony.soundfont.refresh": "Refresh",
-  "screen.createpolyphony.soundfont.folder": "Folder: %s"
+  "screen.createpolyphony.soundfont.folder": "Folder: %s",
+
+  "createpolyphony.configuration.title": "Create: Polyphony Configuration",
+  "createpolyphony.configuration.section.createpolyphony.common.toml": "Common",
+  "createpolyphony.configuration.section.createpolyphony.common.toml.title": "Create: Polyphony - Common",
+  "createpolyphony.configuration.maxVoices": "Maximum Voices",
+  "createpolyphony.configuration.maxVoices.tooltip": "Maximum simultaneously active synth voices before oldest notes are culled.",
+  "createpolyphony.configuration.ringBufferBytes": "PCM Ring Buffer (Bytes)",
+  "createpolyphony.configuration.ringBufferBytes.tooltip": "Size of the PCM bridge buffer between synth generation and Minecraft audio playback.",
+  "createpolyphony.configuration.pumpChunkBytes": "Pump Chunk Size (Bytes)",
+  "createpolyphony.configuration.pumpChunkBytes.tooltip": "How many PCM bytes are pulled from Gervill per synth pump iteration."
 }

@@ -23,20 +23,37 @@ public final class SoundFontGuiInteractionHandler {
 
     @SubscribeEvent
     public static void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
-        if (event.getHand() == InteractionHand.OFF_HAND
-            && event.getEntity().getMainHandItem().getItem() instanceof InstrumentItem) {
+        if (shouldSkip(event.getEntity().isShiftKeyDown(), event.getItemStack().getItem() instanceof InstrumentItem, event.getHand(), event.getEntity().getMainHandItem().getItem() instanceof InstrumentItem)) {
             return;
         }
-        if (!event.getEntity().isShiftKeyDown()) return;
-        if (!(event.getItemStack().getItem() instanceof InstrumentItem)) return;
+        if (openScreen()) {
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            event.setCanceled(true);
+        }
+    }
 
-        Minecraft mc = Minecraft.getInstance();
+    @SubscribeEvent
+    public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (shouldSkip(event.getEntity().isShiftKeyDown(), event.getItemStack().getItem() instanceof InstrumentItem, event.getHand(), event.getEntity().getMainHandItem().getItem() instanceof InstrumentItem)) {
+            return;
+        }
+        if (openScreen()) {
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            event.setCanceled(true);
+        }
+    }
+
+    private static boolean shouldSkip(boolean sneaking, boolean holdingInstrument, InteractionHand hand, boolean mainHandIsInstrument) {
+        if (!sneaking || !holdingInstrument) return true;
+        // If both hands hold instruments, let main-hand interaction handle the open.
+        return hand == InteractionHand.OFF_HAND && mainHandIsInstrument;
+    }
+
+    private static boolean openScreen() {
         SoundFontManager manager = SoundFontManager.get();
-        if (manager == null) return;
-
-        mc.setScreen(new SoundFontPickerScreen(manager));
-        event.setCancellationResult(InteractionResult.SUCCESS);
-        event.setCanceled(true);
+        if (manager == null) return false;
+        Minecraft.getInstance().setScreen(new SoundFontPickerScreen(manager));
+        return true;
     }
 }
 

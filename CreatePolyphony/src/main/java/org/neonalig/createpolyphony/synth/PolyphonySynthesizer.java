@@ -122,11 +122,11 @@ public final class PolyphonySynthesizer {
             // headless mode. In practice every JRE we target ships SoftSynthesizer,
             // so this branch is just a safety net.
             CreatePolyphony.LOGGER.warn(
-                "Synthesizer {} doesn't expose openStream(AudioFormat, Map); falling back to open() - audio quality may suffer.",
+                "Synthesizer {} denied openStream(AudioFormat, Map). On Java 21 module layers this usually means missing --add-exports=java.desktop/com.sun.media.sound=createpolyphony.",
                 synth.getClass().getName());
             synth.open();
             throw new MidiUnavailableException(
-                "Active synthesizer doesn't support headless openStream(): " + ex.getMessage());
+                "Active synthesizer doesn't support headless openStream(); add JVM arg --add-exports=java.desktop/com.sun.media.sound=createpolyphony. Root: " + ex.getMessage());
         }
         this.synthStream = stream;
 
