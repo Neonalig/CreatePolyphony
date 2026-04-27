@@ -178,12 +178,6 @@ public final class SoundFontPickerScreen extends Screen {
             int fill = Math.max(1, Math.min(barW, Math.round(barW * manager.loadingProgress01())));
             guiGraphics.fill(barX + 1, barY + 1, barX + fill - 1, barY + barH - 1, 0xFF7CFF7C);
         }
-        guiGraphics.drawString(this.font,
-            Component.translatable("screen.createpolyphony.soundfont.folder", manager.directory().toAbsolutePath().toString()),
-            10,
-            this.height - 48,
-            0xA0A0A0,
-            false);
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
