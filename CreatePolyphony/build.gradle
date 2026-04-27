@@ -89,9 +89,7 @@ neoForge {
             // Please read: https://stackoverflow.com/questions/2031163/when-to-use-the-different-log-levels
             logLevel = org.slf4j.event.Level.DEBUG
 
-            // Required for reflective access to Gervill's headless openStream() on Java 21 module layers.
-            // Without this export, the synth manager still boots in UI-only mode but playback is muted.
-            jvmArguments.addAll('--add-exports=java.desktop/com.sun.media.sound=createpolyphony')
+            // No synth-specific JPMS exports required; audio synthesis is fully in-tree Java.
         }
     }
 

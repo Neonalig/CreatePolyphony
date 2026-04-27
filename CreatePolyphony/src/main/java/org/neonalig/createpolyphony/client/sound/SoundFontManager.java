@@ -124,7 +124,7 @@ public final class SoundFontManager {
 
     /**
      * Acquire (and lazily build) the singleton. The first call may take a few
-     * milliseconds because it boots Gervill; subsequent calls are O(1).
+     * milliseconds because it boots the synth backend; subsequent calls are O(1).
      *
      * @return the manager, or {@code null} if construction failed (e.g. no
      *         filesystem access or no MIDI subsystem). Failure is logged.
@@ -141,7 +141,7 @@ public final class SoundFontManager {
                 synth = new PolyphonySynthesizer(settings);
             } catch (Throwable synthError) {
                 CreatePolyphony.LOGGER.error(
-                    "Sound synthesis backend unavailable; UI and soundfont selection will stay available but note playback is disabled until startup flags are fixed.",
+                    "Sound synthesis backend unavailable; UI and soundfont selection will stay available but note playback is disabled.",
                     synthError);
             }
             SoundFontManager mgr = new SoundFontManager(dir, synth);

@@ -50,7 +50,8 @@ public final class PolyphonyClientTestCommands {
             tell("Failed to initialize SoundFont manager.");
             return 0;
         }
-        Minecraft.getInstance().setScreen(new SoundFontPickerScreen(manager));
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> mc.setScreen(new SoundFontPickerScreen(manager)));
         if (!manager.synthesisAvailable()) {
             tell("Opened SoundFont settings screen (synth backend unavailable; playback currently muted).");
         } else {
@@ -94,10 +95,13 @@ public final class PolyphonyClientTestCommands {
     }
 
     private static void tell(String message) {
-        Player player = Minecraft.getInstance().player;
-        if (player != null) {
-            player.displayClientMessage(Component.literal("[CreatePolyphony] " + message), false);
-        }
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+            Player player = mc.player;
+            if (player != null) {
+                player.displayClientMessage(Component.literal("[CreatePolyphony] " + message), false);
+            }
+        });
     }
 }
 
