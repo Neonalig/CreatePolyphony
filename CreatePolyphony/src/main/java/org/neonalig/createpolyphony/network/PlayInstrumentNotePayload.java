@@ -9,21 +9,18 @@ import org.neonalig.createpolyphony.CreatePolyphony;
 
 /**
  * Server-to-client payload telling the client to play (or stop) a single
- * MIDI note using the sound for a specific General-MIDI program.
+ * MIDI note using a specific General-MIDI program.
  *
  * <p>Only sent to a player when they are linked to a tracker bar that is
  * actively playing, and only for channels assigned to them by
  * {@link org.neonalig.createpolyphony.link.PolyphonyLink}.</p>
  *
- * <h2>Why we send the GM program (not the instrument family)</h2>
- * <p>Sample lookup is keyed on GM program number, because that's what the
- * companion sf2/sfz extraction tool produces - one folder of samples per
- * program (1-128). The held-instrument {@link org.neonalig.createpolyphony.instrument.InstrumentFamily}
- * is only used <em>server-side</em> for routing decisions (which player gets
- * which channel); once a channel has been routed, the actual sample played
- * comes from that channel's current program. A piano-holding player covering
- * a violin channel will therefore play violin samples - that's the intended
- * behaviour, since it lets a small group cover any track.</p>
+ * <h2>Why the server still sends a GM program</h2>
+ * <p>The client synth API is keyed on GM program number. The server now derives
+ * that program from the assigned player's held
+ * {@link org.neonalig.createpolyphony.instrument.InstrumentFamily} so playback
+ * timbre follows the linked instrument rather than the tracker's original
+ * channel program. Channel 10 (index 9) remains reserved for drums.</p>
  *
  * @param program  General-MIDI program number, 0-127. Maps to sound id
  *                 {@code instruments.<NNN>.<octave>} (NNN is 1-indexed,

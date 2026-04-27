@@ -209,24 +209,25 @@ public final class PolyphonyLinkManager {
             debugRoute("warn:not-holding", level, pos, status, data1, data2, assignee);
         }
 
-        // Sample lookup is keyed on GM program. By convention, channel 10 (index 9)
-        // is always percussion regardless of any ProgramChange it received - we
-        // map that to GM program 128 (Standard Drum Kit, 1-indexed) here so the
-        // client looks up the right "instruments.128.*" sound id.
-        int program;
-        if (channel == 9) {
-            program = 127; // 0-indexed; the client's 1-indexed sound id will be "128"
-        } else {
-            program = link.channelProgram(channel) & 0x7F;
-        }
-
-        // Even though the assignee's held InstrumentFamily isn't on the wire,
-        // we still resolve it server-side as a sanity check / debug breadcrumb.
+        // Resolve the assignee's held instrument family and force playback timbre to it.
+        // This keeps player output aligned with what they're physically holding.
         InstrumentFamily family = link.familyOf(assignee);
         if (family == null) {
             debugRoute("drop:no-family", level, pos, status, data1, data2, assignee);
             return;
         }
+
+        // Safety belt: even if assignment data got stale, keep drums isolated.
+        if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
+            debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assignee);
+            return;
+        }
+        if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
+            debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assignee);
+            return;
+        }
+
+        int program = (channel == 9) ? 127 : family.canonicalGmProgram();
 
         PacketDistributor.sendToPlayer(target,
              new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
