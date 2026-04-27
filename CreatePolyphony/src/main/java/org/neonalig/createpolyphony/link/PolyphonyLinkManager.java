@@ -211,6 +211,13 @@ public final class PolyphonyLinkManager {
             new TransientHolderState(level, currentServerTick(level.getServer()) + automationHolderTtlTicks(), holderPosSnap));
     }
 
+    /** Explicitly unregister an automation holder and stop any notes it still owns. */
+    public static void unregisterAutomationHolder(ServerLevel level, UUID holderId) {
+        if (holderId == null) return;
+        TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+        removeHolder(holderId, level);
+    }
+
     /**
      * Force-stop any notes still tracked for this tracker when playback halts abruptly.
      * Called from tracker-stop mixin hooks as a safety net when sequencer NoteOffs are missing.

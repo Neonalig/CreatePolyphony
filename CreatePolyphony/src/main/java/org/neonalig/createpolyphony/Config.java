@@ -58,7 +58,7 @@ public class Config {
 
     public static final ModConfigSpec.EnumValue<DeployerPlaybackMode> DEPLOYER_PLAYBACK_MODE = BUILDER
         .comment("Controls deployer automation playback participation.",
-            "CONTINUOUS_POWERED: keeps deployer holders active between interactions for smooth continuous playback while running.",
+            "CONTINUOUS_POWERED: plays continuously while deployer speed is non-zero and not redstone-locked; stops immediately when power/rotation is lost.",
             "INTERACTION_ONLY: only keeps holders active briefly around deployer interaction ticks (hand fully deploys).")
         .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.INTERACTION_ONLY);
 
