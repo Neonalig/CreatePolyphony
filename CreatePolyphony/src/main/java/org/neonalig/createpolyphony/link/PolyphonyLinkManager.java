@@ -87,12 +87,12 @@ public final class PolyphonyLinkManager {
 
     private static final int MOB_SYNC_INTERVAL_TICKS = 10;
     /**
-     * How long after the last deployer activation before its channel-assignment slot is freed.
-     * This must be long enough to cover the slowest practical contraption rotation.
-     * 200 ticks ≈ 10 s, covering ~0.3 RPM and above with normal note durations.
-     * Expiry only removes channel-assignment; it never early-stops tracked notes.
+     * Holder lifetime for deployer automation participation.
+     * CONTINUOUS_POWERED uses a long grace to avoid play/pause stutter between sparse activations.
+     * INTERACTION_ONLY keeps activation windows brief so playback is tied to full deploy interactions.
      */
-    private static final int AUTOMATION_HOLDER_TTL_TICKS = 200;
+    private static final int AUTOMATION_TTL_CONTINUOUS_TICKS = 20 * 60;
+    private static final int AUTOMATION_TTL_INTERACTION_TICKS = 4;
 
     private PolyphonyLinkManager() {}
 
@@ -201,7 +201,14 @@ public final class PolyphonyLinkManager {
         Vec3 holderPosSnap = deployerPos != null
             ? deployerPos
             : (targetPos != null ? Vec3.atCenterOf(targetPos) : null);
-        TRANSIENT_HOLDER_EXPIRY.put(holderId, new TransientHolderState(level, currentServerTick(level.getServer()) + AUTOMATION_HOLDER_TTL_TICKS, holderPosSnap));
+        TRANSIENT_HOLDER_EXPIRY.put(holderId,
+            new TransientHolderState(level, currentServerTick(level.getServer()) + automationHolderTtlTicks(), holderPosSnap));
+    }
+
+    private static int automationHolderTtlTicks() {
+        return Config.deployerPlaybackMode() == Config.DeployerPlaybackMode.INTERACTION_ONLY
+            ? AUTOMATION_TTL_INTERACTION_TICKS
+            : AUTOMATION_TTL_CONTINUOUS_TICKS;
     }
 
     /** Get (without creating) the link at the given (level, pos), or {@code null}. */

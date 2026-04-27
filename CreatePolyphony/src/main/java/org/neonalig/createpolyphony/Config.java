@@ -14,6 +14,11 @@ public class Config {
         RESPONSIVE
     }
 
+    public enum DeployerPlaybackMode {
+        CONTINUOUS_POWERED,
+        INTERACTION_ONLY
+    }
+
     public static final ModConfigSpec.IntValue MAX_VOICES = BUILDER
         .comment("Maximum simultaneous active voices in the real-time synth. Oldest voices are culled first when the limit is exceeded.")
         .defineInRange("maxVoices", 32, 1, 256);
@@ -50,6 +55,12 @@ public class Config {
     public static final ModConfigSpec.EnumValue<SoundSource> SYNTH_SOUND_SOURCE = BUILDER
         .comment("Which Minecraft volume slider controls instrument synth playback.")
         .defineEnum("synthSoundSource", SoundSource.RECORDS);
+
+    public static final ModConfigSpec.EnumValue<DeployerPlaybackMode> DEPLOYER_PLAYBACK_MODE = BUILDER
+        .comment("Controls deployer automation playback participation.",
+            "CONTINUOUS_POWERED: keeps deployer holders active between interactions for smooth continuous playback while running.",
+            "INTERACTION_ONLY: only keeps holders active briefly around deployer interaction ticks (hand fully deploys).")
+        .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.CONTINUOUS_POWERED);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -110,6 +121,10 @@ public class Config {
 
     public static SoundSource synthSoundSource() {
         return SYNTH_SOUND_SOURCE.get();
+    }
+
+    public static DeployerPlaybackMode deployerPlaybackMode() {
+        return DEPLOYER_PLAYBACK_MODE.get();
     }
 
     public static SynthSettings synthSettings() {
