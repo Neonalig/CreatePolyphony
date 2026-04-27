@@ -37,7 +37,9 @@ import java.util.UUID;
  *         <li>Among the linked players, pick one whose held instrument's family
  *             matches that preferred family. Ties are broken by least-loaded
  *             player (fewest channels assigned so far) to keep load balanced.</li>
- *         <li>If no holder matches, leave the channel unassigned (silent).</li>
+ *         <li>If no holder matches, fall back to deterministic least-loaded
+ *             round-robin across all linked instruments so the whole song can
+ *             still be covered.</li>
  *       </ol>
  *   </li>
  * </ol>
@@ -143,8 +145,7 @@ public final class PolyphonyLink {
 
     /**
      * Returns the UUID of the player currently assigned to play the given MIDI
-     * channel, or {@code null} if no linked player matches that channel's
-     * preferred instrument family.
+     * channel, or {@code null} if no linked players exist.
      */
     @Nullable
     public UUID assigneeFor(int channel) {
@@ -183,8 +184,8 @@ public final class PolyphonyLink {
             return;
         }
 
-        // Multi-player path: strict family matching only.
-        // Track per-player load so ties among same-family holders stay balanced.
+        // Multi-player path: preferred-family first, then deterministic least-loaded fallback.
+        // Track per-player load so both matching picks and fallback picks stay balanced.
         Map<UUID, Integer> load = new LinkedHashMap<>();
         for (UUID id : players.keySet()) load.put(id, 0);
 
@@ -199,6 +200,9 @@ public final class PolyphonyLink {
             );
 
             UUID winner = pickLeastLoadedMatching(order, load, preferred);
+            if (winner == null) {
+                winner = pickLeastLoaded(order, load);
+            }
             channelAssignments[ch] = winner;
             if (winner != null) load.merge(winner, 1, Integer::sum);
         }
@@ -212,6 +216,20 @@ public final class PolyphonyLink {
         int bestLoad = Integer.MAX_VALUE;
         for (LinkedPlayer lp : order) {
             if (lp.family() != preferred) continue;
+            int l = load.get(lp.id());
+            if (l < bestLoad) {
+                bestLoad = l;
+                best = lp.id();
+            }
+        }
+        return best;
+    }
+
+    @Nullable
+    private static UUID pickLeastLoaded(List<LinkedPlayer> order, Map<UUID, Integer> load) {
+        UUID best = null;
+        int bestLoad = Integer.MAX_VALUE;
+        for (LinkedPlayer lp : order) {
             int l = load.get(lp.id());
             if (l < bestLoad) {
                 bestLoad = l;

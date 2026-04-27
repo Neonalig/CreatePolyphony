@@ -257,17 +257,23 @@ public final class PolyphonyLinkManager {
 
     private static Map<LinkKey, InstrumentFamily> desiredHeldLinks(ServerPlayer player) {
         Map<LinkKey, InstrumentFamily> desired = new HashMap<>();
-        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.MAINHAND));
-        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND));
+        // Off-hand takes precedence when both hands are linked to the same tracker.
+        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND), false);
+        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.MAINHAND), true);
         return desired;
     }
 
-    private static void collectHeldLink(Map<LinkKey, InstrumentFamily> out, ItemStack stack) {
+    private static void collectHeldLink(Map<LinkKey, InstrumentFamily> out, ItemStack stack, boolean onlyIfAbsent) {
         InstrumentFamily family = InstrumentItem.familyOf(stack);
         if (family == null) return;
         InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
         if (target == null) return;
-        out.put(new LinkKey(target.levelPath(), target.pos().immutable()), family);
+        LinkKey key = new LinkKey(target.levelPath(), target.pos().immutable());
+        if (onlyIfAbsent) {
+            out.putIfAbsent(key, family);
+        } else {
+            out.put(key, family);
+        }
     }
 
     private static ItemStack findHeldStackFor(ServerPlayer player, LinkKey key, InstrumentFamily family) {
