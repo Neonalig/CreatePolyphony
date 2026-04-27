@@ -27,6 +27,9 @@ public final class SoundFontPickerScreen extends Screen {
     private final SoundFontManager manager;
     private final Consumer<SoundFontManager> managerListener;
 
+    private int listTop;
+    private int listBottom;
+
     private SoundFontList list;
     private Button setActiveButton;
     private Button openFolderButton;
@@ -44,9 +47,9 @@ public final class SoundFontPickerScreen extends Screen {
     protected void init() {
         super.init();
 
-        int listTop = 32;
-        int listBottom = this.height - 60;
-        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, this.width, listBottom, listTop, 20));
+        this.listTop = 32;
+        this.listBottom = this.height - 60;
+        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, this.width, this.listBottom, this.listTop, 20));
 
         int buttonY = this.height - 28;
         int pad = 6;
@@ -153,6 +156,11 @@ public final class SoundFontPickerScreen extends Screen {
         if (list != null) {
             list.render(guiGraphics, mouseX, mouseY, partialTick);
         }
+
+        // Draw solid header/footer panels so title and buttons sit inside a panel,
+        // not floating over the blurred world background.
+        guiGraphics.fill(0, 0, this.width, this.listTop, 0xFF1A1A1A);
+        guiGraphics.fill(0, this.listBottom, this.width, this.height, 0xFF1A1A1A);
 
         guiGraphics.drawCenteredString(this.font, this.title, this.width / 2, 12, 0xFFFFFF);
         if (manager.isLoading()) {
