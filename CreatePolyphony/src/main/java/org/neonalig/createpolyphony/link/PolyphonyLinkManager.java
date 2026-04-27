@@ -9,6 +9,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
@@ -254,12 +255,16 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        // ONE_MAN_BAND uses the actual MIDI channel program to play every instrument
-        // exactly as the MIDI file intended. All other instruments use their canonical
-        // family program so playback timbre reflects the held item.
+        // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
+        // supported instrument families, controlled by config.
         int program;
         if (family.isWildcard()) {
-            program = link.channelProgram(channel);
+            if (Config.oneManBandUsesAllGmPrograms()) {
+                program = link.channelProgram(channel);
+            } else {
+                InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, link.channelProgram(channel));
+                program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
+            }
         } else {
             program = (channel == 9) ? 127 : family.canonicalGmProgram();
         }

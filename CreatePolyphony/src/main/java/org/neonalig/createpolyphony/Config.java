@@ -41,6 +41,11 @@ public class Config {
         .comment("Smoothing factor for adaptive timing controller (0..1). Lower = steadier, higher = more reactive.")
         .defineInRange("adaptiveEwmaAlpha", 0.15D, 0.01D, 1.0D);
 
+    public static final ModConfigSpec.BooleanValue ONE_MAN_BAND_USE_ALL_GM_PROGRAMS = BUILDER
+        .comment("If true, One Man Band uses raw MIDI programs for full GM playback.",
+            "If false, One Man Band snaps to supported instrument families only.")
+        .define("oneManBandUseAllGmPrograms", true);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     public static void applyAudioTimingPreset(AudioTimingPreset preset) {
@@ -91,6 +96,10 @@ public class Config {
 
     public static double adaptiveEwmaAlpha() {
         return ADAPTIVE_EWMA_ALPHA.get();
+    }
+
+    public static boolean oneManBandUsesAllGmPrograms() {
+        return ONE_MAN_BAND_USE_ALL_GM_PROGRAMS.get();
     }
 
     public static SynthSettings synthSettings() {
