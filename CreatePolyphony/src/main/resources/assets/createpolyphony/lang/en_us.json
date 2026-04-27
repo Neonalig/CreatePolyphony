@@ -41,6 +41,7 @@
   "screen.createpolyphony.soundfont.refresh": "Refresh",
   "screen.createpolyphony.soundfont.panic": "Panic",
   "screen.createpolyphony.soundfont.cancel": "Cancel",
+  "hud.createpolyphony.soundfont.loading": "Loading soundfont...",
   "screen.createpolyphony.soundfont.loading": "Loading soundfont...",
   "screen.createpolyphony.soundfont.loading_name": "Loading: %s",
   "screen.createpolyphony.soundfont.folder": "Folder: %s",
