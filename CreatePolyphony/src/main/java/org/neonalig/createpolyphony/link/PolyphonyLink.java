@@ -38,8 +38,9 @@ import java.util.UUID;
  *             matches that preferred family. Ties are broken by least-loaded
  *             player (fewest channels assigned so far) to keep load balanced.</li>
  *         <li>If no holder matches, fall back to deterministic least-loaded
- *             round-robin across all linked instruments so the whole song can
- *             still be covered.</li>
+ *             round-robin across all <em>eligible</em> linked instruments so
+ *             the whole song can still be covered where possible. Drum channel
+ *             fallback remains drum-kit-only.</li>
  *       </ol>
  *   </li>
  * </ol>
@@ -201,7 +202,7 @@ public final class PolyphonyLink {
 
             UUID winner = pickLeastLoadedMatching(order, load, preferred);
             if (winner == null) {
-                winner = pickLeastLoaded(order, load);
+                winner = pickLeastLoadedEligible(order, load, ch == 9);
             }
             channelAssignments[ch] = winner;
             if (winner != null) load.merge(winner, 1, Integer::sum);
@@ -226,10 +227,14 @@ public final class PolyphonyLink {
     }
 
     @Nullable
-    private static UUID pickLeastLoaded(List<LinkedPlayer> order, Map<UUID, Integer> load) {
+    private static UUID pickLeastLoadedEligible(List<LinkedPlayer> order,
+                                                Map<UUID, Integer> load,
+                                                boolean drumsOnly) {
         UUID best = null;
         int bestLoad = Integer.MAX_VALUE;
         for (LinkedPlayer lp : order) {
+            boolean isDrum = lp.family() == InstrumentFamily.DRUM_KIT;
+            if (drumsOnly != isDrum) continue;
             int l = load.get(lp.id());
             if (l < bestLoad) {
                 bestLoad = l;

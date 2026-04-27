@@ -21,31 +21,17 @@ public final class MeltySynthEngine {
     private static final int EVT_ALL_NOTES_OFF = 6;
 
     private final SynthSettings settings;
-    private final float sampleRate;
-    private final int maxVoices;
-    private final int blockFrames;
-
-    private final ChannelState[] channels = new ChannelState[16];
-    private final Voice[] voices;
-    private int voiceCount;
-    private long voiceClock;
 
     private final MidiEventQueue midiQueue = new MidiEventQueue(8192);
     private final int[] midiEventScratch = new int[4];
 
     private MeltySoundFont soundFont;
+    private Synthesizer synthesizer;
     private boolean soundFontLoaded;
     private volatile boolean closed;
 
     public MeltySynthEngine(SynthSettings settings) {
         this.settings = settings;
-        this.sampleRate = settings.sampleRate();
-        this.maxVoices = Math.max(1, settings.maxVoices());
-        this.blockFrames = 64;
-        this.voices = new Voice[this.maxVoices];
-        for (int i = 0; i < channels.length; i++) {
-            channels[i] = new ChannelState(i == 9);
-        }
     }
 
     public SynthSettings settings() {
@@ -54,15 +40,18 @@ public final class MeltySynthEngine {
 
     public void loadSoundFont(MeltySoundFont soundFont) {
         this.soundFont = soundFont;
+        SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
+        synthSettings.blockSize(Math.max(8, Math.min(1024, settings.pumpChunkBytes() / Math.max(1, settings.frameSize()))));
+        synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
+        synthSettings.enableReverbAndChorus(true);
+        this.synthesizer = new Synthesizer(soundFont.soundFont(), synthSettings);
         this.soundFontLoaded = true;
         allNotesOff();
-        for (int i = 0; i < channels.length; i++) {
-            channels[i].resetForNewBank();
-        }
     }
 
     public void unloadSoundFont() {
         this.soundFont = null;
+        this.synthesizer = null;
         this.soundFontLoaded = false;
         allNotesOff();
     }
@@ -120,7 +109,7 @@ public final class MeltySynthEngine {
     public void close() {
         closed = true;
         midiQueue.clear();
-        voiceCount = 0;
+        synthesizer = null;
     }
 
     /**
@@ -141,47 +130,30 @@ public final class MeltySynthEngine {
 
         drainMidi();
 
-        if (!soundFontLoaded || voiceCount == 0) {
+        if (!soundFontLoaded || synthesizer == null || synthesizer.activeVoiceCount() == 0) {
             Arrays.fill(out, offset, offset + frameBytes, (byte) 0);
             return frameBytes;
         }
 
         int frames = frameBytes / frameSize;
+        float[] left = new float[frames];
+        float[] right = new float[frames];
+        synthesizer.render(left, right, 0, frames);
         int write = offset;
         int channelsOut = Math.max(1, settings.channels());
-
-        float[] leftBlock = new float[blockFrames];
-        float[] rightBlock = new float[blockFrames];
-        int rendered = 0;
-        while (rendered < frames) {
-            int count = Math.min(blockFrames, frames - rendered);
-            Arrays.fill(leftBlock, 0, count, 0F);
-            Arrays.fill(rightBlock, 0, count, 0F);
-
-            for (int v = voiceCount - 1; v >= 0; v--) {
-                Voice voice = voices[v];
-                ChannelState channel = channels[voice.channel];
-                if (!voice.renderInto(channel, leftBlock, rightBlock, count)) {
-                    removeVoice(v);
+        for (int i = 0; i < frames; i++) {
+            short l = toPcm16(left[i]);
+            if (channelsOut == 1) {
+                out[write++] = (byte) (l & 0xFF);
+                out[write++] = (byte) ((l >>> 8) & 0xFF);
+            } else {
+                short r = toPcm16(right[i]);
+                for (int ch = 0; ch < channelsOut; ch++) {
+                    short s = (ch & 1) == 0 ? l : r;
+                    out[write++] = (byte) (s & 0xFF);
+                    out[write++] = (byte) ((s >>> 8) & 0xFF);
                 }
             }
-
-            for (int i = 0; i < count; i++) {
-                short l = toPcm16(leftBlock[i]);
-                if (channelsOut == 1) {
-                    out[write] = (byte) (l & 0xFF);
-                    out[write + 1] = (byte) ((l >>> 8) & 0xFF);
-                    write += 2;
-                } else {
-                    short r = toPcm16(rightBlock[i]);
-                    for (int ch = 0; ch < channelsOut; ch++) {
-                        short s = (ch & 1) == 0 ? l : r;
-                        out[write++] = (byte) (s & 0xFF);
-                        out[write++] = (byte) ((s >>> 8) & 0xFF);
-                    }
-                }
-            }
-            rendered += count;
         }
 
         return frameBytes;
@@ -194,127 +166,27 @@ public final class MeltySynthEngine {
             int data1 = midiEventScratch[2];
             int data2 = midiEventScratch[3];
 
+            if (synthesizer == null && type != EVT_ALL_NOTES_OFF) {
+                continue;
+            }
+
             switch (type) {
-                case EVT_NOTE_ON -> handleNoteOn(channel, data1, data2);
-                case EVT_NOTE_OFF -> handleNoteOff(channel, data1);
-                case EVT_PROGRAM -> channels[channel].program = data1;
-                case EVT_BEND -> channels[channel].pitchBend = data1;
-                case EVT_CC -> handleControlChange(channel, data1, data2);
-                case EVT_ALL_NOTES_OFF -> clearVoices();
+                case EVT_NOTE_ON -> synthesizer.noteOn(channel, data1, data2);
+                case EVT_NOTE_OFF -> synthesizer.noteOff(channel, data1);
+                case EVT_PROGRAM -> synthesizer.processMidiMessage(channel, 0xC0, data1, 0);
+                case EVT_BEND -> synthesizer.processMidiMessage(channel, 0xE0, data1 & 0x7F, (data1 >> 7) & 0x7F);
+                case EVT_CC -> synthesizer.processMidiMessage(channel, 0xB0, data1, data2);
+                case EVT_ALL_NOTES_OFF -> {
+                    if (synthesizer != null) {
+                        synthesizer.noteOffAll(false);
+                    }
+                }
                 default -> {
                 }
             }
         }
     }
 
-    private void handleControlChange(int channel, int controller, int value) {
-        ChannelState state = channels[channel];
-        switch (controller) {
-            case 0 -> state.bankMsb = value & 0x7F;
-            case 7 -> state.volume = value / 127F;
-            case 10 -> state.pan = (value / 127F) * 100F - 50F;
-            case 11 -> state.expression = value / 127F;
-            case 91 -> state.reverbSend = value / 127F;
-            case 93 -> state.chorusSend = value / 127F;
-            case 64 -> {
-                state.sustain = value >= 64;
-                if (!state.sustain) {
-                    for (int i = 0; i < voiceCount; i++) {
-                        Voice voice = voices[i];
-                        if (voice.channel == channel && voice.heldBySustain) {
-                            startRelease(voice);
-                            voice.heldBySustain = false;
-                        }
-                    }
-                }
-            }
-            default -> {
-            }
-        }
-        state.recomputeOutputGain();
-    }
-
-    private void handleNoteOn(int channel, int note, int velocity) {
-        if (!soundFontLoaded || velocity <= 0) {
-            return;
-        }
-        ChannelState state = channels[channel];
-        int bank = state.percussion ? 128 : state.bankMsb;
-        Preset preset = soundFont.findPreset(bank, state.program);
-        if (preset == null) return;
-
-        for (PresetRegion presetRegion : preset.regions()) {
-            if (!presetRegion.contains(note, velocity)) continue;
-
-            Instrument instrument = presetRegion.instrument();
-            for (InstrumentRegion instrumentRegion : instrument.regions()) {
-                if (!instrumentRegion.contains(note, velocity)) continue;
-                RegionPair pair = new RegionPair(presetRegion, instrumentRegion);
-                startVoice(channel, note, velocity, pair);
-            }
-        }
-    }
-
-    private void startVoice(int channel, int note, int velocity, RegionPair pair) {
-        int idx = requestVoiceSlot(channel, note);
-        if (idx < 0) return;
-        Voice voice = voices[idx];
-        if (voice == null) {
-            voice = new Voice();
-            voices[idx] = voice;
-            if (idx == voiceCount) voiceCount++;
-        }
-        voice.start(soundFont, channel, note, velocity, pair, sampleRate, ++voiceClock);
-    }
-
-    private int requestVoiceSlot(int channel, int key) {
-        if (voiceCount < maxVoices) {
-            return voiceCount;
-        }
-        int worst = -1;
-        float worstPriority = Float.MAX_VALUE;
-        for (int i = 0; i < voiceCount; i++) {
-            Voice v = voices[i];
-            if (v == null) continue;
-            if (v.channel == channel && v.note == key) return i;
-            float p = v.priority();
-            if (p < worstPriority) {
-                worstPriority = p;
-                worst = i;
-            }
-        }
-        return worst;
-    }
-
-    private void handleNoteOff(int channel, int note) {
-        ChannelState state = channels[channel];
-        for (int i = voiceCount - 1; i >= 0; i--) {
-            Voice voice = voices[i];
-            if (voice.channel != channel || voice.note != note) {
-                continue;
-            }
-            if (state.sustain) {
-                voice.heldBySustain = true;
-            } else {
-                startRelease(voice);
-            }
-        }
-    }
-
-    private void startRelease(Voice voice) {
-        voice.requestRelease();
-    }
-
-    private void clearVoices() {
-        voiceCount = 0;
-    }
-
-    private void removeVoice(int index) {
-        int last = voiceCount - 1;
-        voices[index] = voices[last];
-        voices[last] = null;
-        voiceCount = last;
-    }
 
     private static short toPcm16(float sample) {
         float clamped = Math.max(-1F, Math.min(1F, sample));
