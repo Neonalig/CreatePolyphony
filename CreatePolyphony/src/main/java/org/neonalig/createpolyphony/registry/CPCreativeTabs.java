@@ -24,7 +24,7 @@ public final class CPCreativeTabs {
             .title(Component.translatable("itemGroup." + CreatePolyphony.MODID + ".polyphony"))
             .withTabsBefore(CreativeModeTabs.COMBAT)
             // Use the piano as the tab icon; it's the most universally recognisable instrument.
-            .icon(() -> CPItems.BY_FAMILY.get(InstrumentFamily.PIANO).get().getDefaultInstance())
+            .icon(() -> CPItems.BY_FAMILY.get(InstrumentFamily.ACCORDION).get().getDefaultInstance())
             .displayItems((params, output) -> {
                 for (var holder : CPItems.all()) {
                     output.accept(holder.get());
