@@ -1,9 +1,9 @@
-﻿{
+{
   "replace": false,
   "values": [
-    "minecraft:string",
+    "minecraft:iron_ingot",
     {
-      "id": "#c:strings",
+      "id": "#c:iron_ingots",
       "required": false
     }
   ]

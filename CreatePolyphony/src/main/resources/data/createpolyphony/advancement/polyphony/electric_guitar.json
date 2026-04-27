@@ -1,0 +1,33 @@
+{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:electric_guitar"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.electric_guitar.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.electric_guitar.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_electric_guitar": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:electric_guitar"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

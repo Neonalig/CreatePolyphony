@@ -1,9 +1,9 @@
-﻿{
+{
   "replace": false,
   "values": [
-    "minecraft:iron_nugget",
+    "minecraft:redstone",
     {
-      "id": "#c:iron_nuggets",
+      "id": "#c:redstones",
       "required": false
     }
   ]

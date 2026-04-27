@@ -1,0 +1,47 @@
+{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:accordion"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.linked_up.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.linked_up.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "use_instrument_on_tracker_bar": {
+      "trigger": "minecraft:item_used_on_block",
+      "conditions": {
+        "location": {
+          "block": {
+            "blocks": [
+              "pipeorgans:tracker_bar"
+            ]
+          }
+        },
+        "item": {
+          "items": [
+            "createpolyphony:piano",
+            "createpolyphony:acoustic_guitar",
+            "createpolyphony:electric_guitar",
+            "createpolyphony:bass_guitar",
+            "createpolyphony:violin",
+            "createpolyphony:trumpet",
+            "createpolyphony:flute",
+            "createpolyphony:accordion",
+            "createpolyphony:drum_kit",
+            "createpolyphony:one_man_band"
+          ]
+        }
+      }
+    }
+  }
+}
+

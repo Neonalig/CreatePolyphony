@@ -1,9 +1,9 @@
-﻿{
+{
   "replace": false,
   "values": [
-    "minecraft:paper",
+    "minecraft:iron_nugget",
     {
-      "id": "#c:papers",
+      "id": "#c:iron_nuggets",
       "required": false
     }
   ]

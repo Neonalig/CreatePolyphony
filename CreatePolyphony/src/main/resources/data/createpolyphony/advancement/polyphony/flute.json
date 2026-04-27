@@ -1,0 +1,33 @@
+{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:flute"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.flute.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.flute.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_flute": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:flute"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

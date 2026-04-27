@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -80,6 +81,10 @@ public final class PolyphonyInteractionHandler {
         }
 
         PolyphonyLinkManager.LinkAction action = PolyphonyLinkManager.linkOrToggle(player, sl, pos, held);
+        if (action == PolyphonyLinkManager.LinkAction.LINKED) {
+            PolyphonyAdvancementGrants.grantForHeldInstrument(player, held);
+            PolyphonyAdvancementGrants.grantLinkedUp(player);
+        }
         if (action != PolyphonyLinkManager.LinkAction.NOT_INSTRUMENT) {
             // Cancel the vanilla GUI-open path so right-clicking with an instrument
             // doesn't also open the tracker bar's UI - linking is a distinct gesture.
@@ -97,6 +102,32 @@ public final class PolyphonyInteractionHandler {
         if (be == null) {
             CreatePolyphony.LOGGER.warn("Tracker bar at {} has no block entity - is SoS installed?", pos);
         }
+    }
+
+    @SubscribeEvent
+    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        ItemStack held = player.getItemInHand(event.getHand());
+        if (!(held.getItem() instanceof InstrumentItem)) return;
+
+        PolyphonyAdvancementGrants.grantForHeldInstrument(player, held);
+        PolyphonyAdvancementGrants.grantJamSession(player);
+    }
+
+    @SubscribeEvent
+    public static void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        ItemStack crafted = event.getCrafting();
+        if (!(crafted.getItem() instanceof InstrumentItem)) return;
+        PolyphonyAdvancementGrants.grantForHeldInstrument(player, crafted);
+    }
+
+    @SubscribeEvent
+    public static void onItemPickup(ItemEntityPickupEvent.Post event) {
+        if (!(event.getPlayer() instanceof ServerPlayer player)) return;
+        ItemStack pickedUp = event.getItemEntity().getItem();
+        if (!(pickedUp.getItem() instanceof InstrumentItem)) return;
+        PolyphonyAdvancementGrants.grantForHeldInstrument(player, pickedUp);
     }
 
     @SubscribeEvent

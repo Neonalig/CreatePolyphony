@@ -1,9 +1,9 @@
-﻿{
+{
   "replace": false,
   "values": [
-    "minecraft:iron_ingot",
+    "minecraft:copper_ingot",
     {
-      "id": "#c:iron_ingots",
+      "id": "#c:copper_ingots",
       "required": false
     }
   ]
