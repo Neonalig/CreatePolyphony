@@ -1,5 +1,6 @@
 package org.neonalig.createpolyphony.synth.meltysynth;
 
+import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.synth.SynthSettings;
 
 import java.util.Arrays;
@@ -25,9 +26,9 @@ public final class MeltySynthEngine {
     private final MidiEventQueue midiQueue = new MidiEventQueue(8192);
     private final int[] midiEventScratch = new int[4];
 
-    private MeltySoundFont soundFont;
-    private Synthesizer synthesizer;
-    private boolean soundFontLoaded;
+    private volatile MeltySoundFont soundFont;
+    private volatile Synthesizer synthesizer;
+    private volatile boolean soundFontLoaded;
     private volatile boolean closed;
 
     public MeltySynthEngine(SynthSettings settings) {
@@ -39,12 +40,13 @@ public final class MeltySynthEngine {
     }
 
     public void loadSoundFont(MeltySoundFont soundFont) {
-        this.soundFont = soundFont;
         SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
         synthSettings.blockSize(Math.max(8, Math.min(1024, settings.pumpChunkBytes() / Math.max(1, settings.frameSize()))));
         synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
         synthSettings.enableReverbAndChorus(true);
-        this.synthesizer = new Synthesizer(soundFont.soundFont(), synthSettings);
+        Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
+        this.soundFont = soundFont;
+        this.synthesizer = newSynth;
         this.soundFontLoaded = true;
         allNotesOff();
     }
@@ -108,8 +110,10 @@ public final class MeltySynthEngine {
 
     public void close() {
         closed = true;
-        midiQueue.clear();
         synthesizer = null;
+        soundFont = null;
+        soundFontLoaded = false;
+        midiQueue.clear();
     }
 
     /**
@@ -128,17 +132,22 @@ public final class MeltySynthEngine {
             return 0;
         }
 
-        drainMidi();
+        int frames = frameBytes / frameSize;
+        Synthesizer current = synthesizer;
+        drainMidi(current);
 
-        if (!soundFontLoaded || synthesizer == null || synthesizer.activeVoiceCount() == 0) {
+        float[] left = null;
+        float[] right = null;
+        if (soundFontLoaded && current != null && current.activeVoiceCount() > 0) {
+            left = new float[frames];
+            right = new float[frames];
+            current.render(left, right, 0, frames);
+        }
+        if (left == null) {
             Arrays.fill(out, offset, offset + frameBytes, (byte) 0);
             return frameBytes;
         }
 
-        int frames = frameBytes / frameSize;
-        float[] left = new float[frames];
-        float[] right = new float[frames];
-        synthesizer.render(left, right, 0, frames);
         int write = offset;
         int channelsOut = Math.max(1, settings.channels());
         for (int i = 0; i < frames; i++) {
@@ -159,26 +168,26 @@ public final class MeltySynthEngine {
         return frameBytes;
     }
 
-    private void drainMidi() {
+    private void drainMidi(@Nullable Synthesizer synth) {
         while (midiQueue.poll(midiEventScratch)) {
             int type = midiEventScratch[0];
             int channel = midiEventScratch[1];
             int data1 = midiEventScratch[2];
             int data2 = midiEventScratch[3];
 
-            if (synthesizer == null && type != EVT_ALL_NOTES_OFF) {
+            if (synth == null && type != EVT_ALL_NOTES_OFF) {
                 continue;
             }
 
             switch (type) {
-                case EVT_NOTE_ON -> synthesizer.noteOn(channel, data1, data2);
-                case EVT_NOTE_OFF -> synthesizer.noteOff(channel, data1);
-                case EVT_PROGRAM -> synthesizer.processMidiMessage(channel, 0xC0, data1, 0);
-                case EVT_BEND -> synthesizer.processMidiMessage(channel, 0xE0, data1 & 0x7F, (data1 >> 7) & 0x7F);
-                case EVT_CC -> synthesizer.processMidiMessage(channel, 0xB0, data1, data2);
+                case EVT_NOTE_ON -> synth.noteOn(channel, data1, data2);
+                case EVT_NOTE_OFF -> synth.noteOff(channel, data1);
+                case EVT_PROGRAM -> synth.processMidiMessage(channel, 0xC0, data1, 0);
+                case EVT_BEND -> synth.processMidiMessage(channel, 0xE0, data1 & 0x7F, (data1 >> 7) & 0x7F);
+                case EVT_CC -> synth.processMidiMessage(channel, 0xB0, data1, data2);
                 case EVT_ALL_NOTES_OFF -> {
-                    if (synthesizer != null) {
-                        synthesizer.noteOffAll(false);
+                    if (synth != null) {
+                        synth.noteOffAll(false);
                     }
                 }
                 default -> {

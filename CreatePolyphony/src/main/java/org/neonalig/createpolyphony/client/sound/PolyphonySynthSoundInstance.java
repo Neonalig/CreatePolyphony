@@ -71,7 +71,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
     private boolean stopped = false;
 
     public PolyphonySynthSoundInstance(PolyphonySynthesizer synth) {
-        super(SYNTH_LOCATION, SoundSource.PLAYERS, RandomSource.create());
+        super(SYNTH_LOCATION, SoundSource.BLOCKS, RandomSource.create());
         this.synth = synth;
         // Build a Sound with stream=true so SoundEngine routes through our getStream() override
         // rather than the static-buffer path. The path/location values don't matter because

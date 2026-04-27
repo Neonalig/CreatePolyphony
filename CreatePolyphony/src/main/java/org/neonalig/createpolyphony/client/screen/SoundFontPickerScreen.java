@@ -8,6 +8,7 @@ import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
+import org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler;
 import org.neonalig.createpolyphony.client.sound.SoundFontManager;
 
 import java.util.Objects;
@@ -43,8 +44,8 @@ public final class SoundFontPickerScreen extends Screen {
 
         int buttonY = this.height - 28;
         int pad = 6;
-        int buttonW = 90;
-        int totalW = buttonW * 3 + pad * 2;
+        int buttonW = 84;
+        int totalW = buttonW * 4 + pad * 3;
         int startX = (this.width - totalW) / 2;
 
         this.setActiveButton = this.addRenderableWidget(Button.builder(
@@ -63,6 +64,12 @@ public final class SoundFontPickerScreen extends Screen {
                 Component.translatable("screen.createpolyphony.soundfont.refresh"),
                 b -> manager.rescan())
             .bounds(startX + (buttonW + pad) * 2, buttonY, buttonW, 20)
+            .build());
+
+        this.addRenderableWidget(Button.builder(
+                Component.translatable("screen.createpolyphony.soundfont.panic"),
+                b -> PolyphonyClientNoteHandler.panic())
+            .bounds(startX + (buttonW + pad) * 3, buttonY, buttonW, 20)
             .build());
 
         manager.addListener(managerListener);

@@ -18,6 +18,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -62,6 +63,8 @@ public final class PolyphonyLinkManager {
 
     /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
     private static final Map<UUID, Map<LinkKey, InstrumentFamily>> ACTIVE_HAND_LINKS = new HashMap<>();
+    /** Active note ownership per link: (channel,note) -> player UUID currently expected to receive NoteOff. */
+    private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
 
     private PolyphonyLinkManager() {}
 
@@ -118,8 +121,12 @@ public final class PolyphonyLinkManager {
                 if (desired.containsKey(key)) continue;
                 PolyphonyLink link = LINKS.get(key);
                 if (link != null) {
+                    forceStopNotesOwnedBy(slFrom(player), key, id);
                     link.removePlayer(id);
-                    if (link.isEmpty()) LINKS.remove(key);
+                    if (link.isEmpty()) {
+                        LINKS.remove(key);
+                        ACTIVE_NOTE_OWNERS.remove(key);
+                    }
                 }
             }
         }
@@ -191,6 +198,24 @@ public final class PolyphonyLinkManager {
             return;
         }
 
+        int note = data1 & 0x7F;
+        int velocity = data2 & 0x7F;
+        boolean noteOff = command == 0x80 || velocity == 0;
+        LinkKey key = LinkKey.of(level, pos);
+        ActiveNoteKey activeNoteKey = new ActiveNoteKey(channel, note);
+
+        if (noteOff) {
+            UUID recordedOwner = consumeTrackedOwner(key, activeNoteKey);
+            if (recordedOwner != null) {
+                if (sendNotePacket(level, recordedOwner, 0, channel, 0x80, note, velocity)) {
+                    debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
+                } else {
+                    debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
+                }
+                return;
+            }
+        }
+
         UUID assignee = link.assigneeFor(channel);
         if (assignee == null) {
             debugRoute("drop:no-assignee", level, pos, status, data1, data2, null);
@@ -203,7 +228,6 @@ public final class PolyphonyLinkManager {
             return;
         }
 
-        LinkKey key = LinkKey.of(level, pos);
         if (!holdsLinkedInstrument(target, key)) {
             // Don't hard-drop note routing here; assignment already came from held-link sync.
             debugRoute("warn:not-holding", level, pos, status, data1, data2, assignee);
@@ -240,9 +264,18 @@ public final class PolyphonyLinkManager {
             program = (channel == 9) ? 127 : family.canonicalGmProgram();
         }
 
-        PacketDistributor.sendToPlayer(target,
-             new PlayInstrumentNotePayload(program, channel, command, data1 & 0x7F, data2 & 0x7F));
-        debugRoute("sent", level, pos, status, data1, data2, assignee);
+        if (sendNotePacket(level, assignee, program, channel, command, note, velocity)) {
+            if (!noteOff) {
+                UUID previousOwner = trackNoteOwner(key, activeNoteKey, assignee);
+                if (previousOwner != null && !Objects.equals(previousOwner, assignee)) {
+                    sendNotePacket(level, previousOwner, 0, channel, 0x80, note, 0);
+                    debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
+                }
+            }
+            debugRoute("sent", level, pos, status, data1, data2, assignee);
+        } else {
+            debugRoute("drop:no-player", level, pos, status, data1, data2, assignee);
+        }
     }
 
     /** Drop active held-link participation for a logging-out player. */
@@ -251,11 +284,64 @@ public final class PolyphonyLinkManager {
         Map<LinkKey, InstrumentFamily> current = ACTIVE_HAND_LINKS.remove(id);
         if (current == null) return;
         for (LinkKey key : current.keySet()) {
+            forceStopNotesOwnedBy(slFrom(player), key, id);
             PolyphonyLink link = LINKS.get(key);
             if (link == null) continue;
             link.removePlayer(id);
-            if (link.isEmpty()) LINKS.remove(key);
+            if (link.isEmpty()) {
+                LINKS.remove(key);
+                ACTIVE_NOTE_OWNERS.remove(key);
+            }
         }
+    }
+
+    private static boolean sendNotePacket(ServerLevel level, UUID assignee, int program, int channel, int command, int note, int velocity) {
+        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
+        if (target == null) return false;
+        PacketDistributor.sendToPlayer(target,
+            new PlayInstrumentNotePayload(program, channel, command, note, velocity));
+        return true;
+    }
+
+    private static UUID trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, UUID assignee) {
+        return ACTIVE_NOTE_OWNERS
+            .computeIfAbsent(key, ignored -> new HashMap<>())
+            .put(noteKey, assignee);
+    }
+
+    @Nullable
+    private static UUID consumeTrackedOwner(LinkKey key, ActiveNoteKey noteKey) {
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null) return null;
+        UUID owner = byNote.remove(noteKey);
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
+        return owner;
+    }
+
+    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID playerId) {
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null || byNote.isEmpty()) return;
+
+        if (level != null) {
+            ServerPlayer target = level.getServer().getPlayerList().getPlayer(playerId);
+            if (target != null) {
+                for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+                    if (!playerId.equals(entry.getValue())) continue;
+                    ActiveNoteKey active = entry.getKey();
+                    PacketDistributor.sendToPlayer(target,
+                        new PlayInstrumentNotePayload(0, active.channel(), 0x80, active.note(), 0));
+                    byNote.remove(active);
+                }
+            }
+        }
+
+        byNote.values().removeIf(playerId::equals);
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
+    }
+
+    @Nullable
+    private static ServerLevel slFrom(ServerPlayer player) {
+        return player.level() instanceof ServerLevel sl ? sl : null;
     }
 
     private static boolean holdsLinkedInstrument(ServerPlayer player, LinkKey key) {
@@ -319,6 +405,8 @@ public final class PolyphonyLinkManager {
             return levelPath + "@" + pos.toShortString();
         }
     }
+
+    private record ActiveNoteKey(int channel, int note) { }
 
     private static void debugRoute(String phase, ServerLevel level, BlockPos pos,
                                    int status, int data1, int data2, @Nullable UUID assignee) {
