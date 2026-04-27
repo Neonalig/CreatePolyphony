@@ -1,0 +1,24 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "LPL",
+    "LIL",
+    "LPL"
+  ],
+  "key": {
+    "L": {
+      "tag": "createpolyphony:instrument_leathers"
+    },
+    "P": {
+      "tag": "createpolyphony:instrument_papers"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_iron_nuggets"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:accordion",
+    "count": 1
+  }
+}

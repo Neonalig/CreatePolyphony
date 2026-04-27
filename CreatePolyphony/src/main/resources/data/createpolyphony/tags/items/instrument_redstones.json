@@ -1,0 +1,11 @@
+﻿{
+  "replace": false,
+  "values": [
+    "minecraft:redstone",
+    {
+      "id": "#c:redstones",
+      "required": false
+    }
+  ]
+}
+

@@ -1,0 +1,24 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " RI",
+    "RPI",
+    "R  "
+  ],
+  "key": {
+    "R": {
+      "tag": "createpolyphony:instrument_redstones"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_iron_ingots"
+    },
+    "P": {
+      "tag": "createpolyphony:instrument_planks"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:electric_guitar",
+    "count": 1
+  }
+}

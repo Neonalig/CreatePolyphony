@@ -1,0 +1,21 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "  G",
+    " SG",
+    "S  "
+  ],
+  "key": {
+    "S": {
+      "tag": "createpolyphony:instrument_rods"
+    },
+    "G": {
+      "tag": "createpolyphony:instrument_gold_nuggets"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:flute",
+    "count": 1
+  }
+}

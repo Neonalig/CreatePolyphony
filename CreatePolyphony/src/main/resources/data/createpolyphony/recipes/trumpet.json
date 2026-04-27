@@ -1,0 +1,21 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " GG",
+    "GIG",
+    " GG"
+  ],
+  "key": {
+    "G": {
+      "tag": "createpolyphony:instrument_gold_nuggets"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_copper_ingots"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:trumpet",
+    "count": 1
+  }
+}

@@ -1,0 +1,24 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " LI",
+    "LPI",
+    "L  "
+  ],
+  "key": {
+    "L": {
+      "tag": "createpolyphony:instrument_leathers"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_iron_ingots"
+    },
+    "P": {
+      "tag": "createpolyphony:instrument_planks"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:bass_guitar",
+    "count": 1
+  }
+}

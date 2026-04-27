@@ -1,0 +1,16 @@
+﻿{
+  "replace": false,
+  "values": [
+    "minecraft:stick",
+    "minecraft:bamboo",
+    {
+      "id": "#c:rods/wooden",
+      "required": false
+    },
+    {
+      "id": "#c:wooden_rods",
+      "required": false
+    }
+  ]
+}
+

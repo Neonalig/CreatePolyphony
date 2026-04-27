@@ -1,0 +1,24 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "L L",
+    "SIS",
+    "L L"
+  ],
+  "key": {
+    "L": {
+      "tag": "createpolyphony:instrument_leathers"
+    },
+    "S": {
+      "tag": "createpolyphony:instrument_rods"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_iron_ingots"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:drum_kit",
+    "count": 1
+  }
+}

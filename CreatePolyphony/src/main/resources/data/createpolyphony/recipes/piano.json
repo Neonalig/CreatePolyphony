@@ -1,0 +1,27 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "PPP",
+    "IWI",
+    "SSS"
+  ],
+  "key": {
+    "P": {
+      "tag": "createpolyphony:instrument_planks"
+    },
+    "I": {
+      "tag": "createpolyphony:instrument_iron_ingots"
+    },
+    "W": {
+      "tag": "minecraft:wool"
+    },
+    "S": {
+      "tag": "createpolyphony:instrument_rods"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:piano",
+    "count": 1
+  }
+}

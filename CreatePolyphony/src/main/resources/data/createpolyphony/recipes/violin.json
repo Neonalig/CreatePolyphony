@@ -1,0 +1,21 @@
+﻿{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " SP",
+    "SPS",
+    "  S"
+  ],
+  "key": {
+    "S": {
+      "tag": "createpolyphony:instrument_strings"
+    },
+    "P": {
+      "tag": "createpolyphony:instrument_planks"
+    }
+  },
+  "result": {
+    "id": "createpolyphony:violin",
+    "count": 1
+  }
+}
