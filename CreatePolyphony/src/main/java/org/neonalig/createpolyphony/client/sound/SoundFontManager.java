@@ -237,6 +237,32 @@ public final class SoundFontManager {
         return synth != null;
     }
 
+    /** Monotonic generation bumping whenever active selection/load lifecycle changes. */
+    public int soundfontGeneration() {
+        return loadGeneration.get();
+    }
+
+    /**
+     * Create an isolated synth loaded with the currently active soundfont.
+     * Used by the client note router for per-source positional audio streams.
+     */
+    @Nullable
+    public PolyphonySynthesizer createIsolatedSynth() {
+        if (closed || loading) return null;
+        String active = activeName;
+        if (active == null) return null;
+        Path target = directory.resolve(active).normalize();
+        if (!target.startsWith(directory.normalize()) || !Files.isRegularFile(target)) return null;
+        try {
+            PolyphonySynthesizer isolated = new PolyphonySynthesizer(Config.synthSettings());
+            isolated.loadSoundFont(target.toFile());
+            return isolated;
+        } catch (Throwable t) {
+            CreatePolyphony.LOGGER.warn("Failed to create isolated synth for {}", target, t);
+            return null;
+        }
+    }
+
     public boolean hasSessionLoadFailure(@Nullable String fileName) {
         return fileName != null && sessionLoadFailures.contains(fileName);
     }

@@ -14,6 +14,11 @@ public class Config {
         RESPONSIVE
     }
 
+    public enum DeployerPlaybackMode {
+        CONTINUOUS_POWERED,
+        INTERACTION_ONLY
+    }
+
     public static final ModConfigSpec.IntValue MAX_VOICES = BUILDER
         .comment("Maximum simultaneous active voices in the real-time synth. Oldest voices are culled first when the limit is exceeded.")
         .defineInRange("maxVoices", 32, 1, 256);
@@ -50,6 +55,12 @@ public class Config {
     public static final ModConfigSpec.EnumValue<SoundSource> SYNTH_SOUND_SOURCE = BUILDER
         .comment("Which Minecraft volume slider controls instrument synth playback.")
         .defineEnum("synthSoundSource", SoundSource.RECORDS);
+
+    public static final ModConfigSpec.EnumValue<DeployerPlaybackMode> DEPLOYER_PLAYBACK_MODE = BUILDER
+        .comment("Controls deployer automation playback participation.",
+            "CONTINUOUS_POWERED: plays continuously while deployer speed is non-zero and not redstone-locked; stops immediately when power/rotation is lost.",
+            "INTERACTION_ONLY: only keeps holders active briefly around deployer interaction ticks (hand fully deploys).")
+        .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.INTERACTION_ONLY);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -107,11 +118,32 @@ public class Config {
         return ONE_MAN_BAND_USE_ALL_GM_PROGRAMS.get();
     }
 
+
     public static SoundSource synthSoundSource() {
         return SYNTH_SOUND_SOURCE.get();
     }
 
+    public static DeployerPlaybackMode deployerPlaybackMode() {
+        return DEPLOYER_PLAYBACK_MODE.get();
+    }
+
     public static SynthSettings synthSettings() {
-        return new SynthSettings(44_100f, 2, 16, MAX_VOICES.get(), RING_BUFFER_BYTES.get(), PUMP_CHUNK_BYTES.get());
+        // OpenAL only spatializes mono sources; keep synth output mono so holder audio
+        // can pan and attenuate in world space.
+        //
+        // Historically these byte-sized knobs were tuned while output was stereo.
+        // After moving to mono, using the same raw byte counts doubles effective
+        // time latency (e.g. 44_100 bytes becomes ~500 ms instead of ~250 ms).
+        // Scale by channel ratio so existing configs keep the same timing feel.
+        int channels = 1;
+        int ringBufferBytes = scaleLegacyStereoBytes(RING_BUFFER_BYTES.get(), channels, 8_192);
+        int pumpChunkBytes = scaleLegacyStereoBytes(PUMP_CHUNK_BYTES.get(), channels, 512);
+        return new SynthSettings(44_100f, channels, 16, MAX_VOICES.get(), ringBufferBytes, pumpChunkBytes);
+    }
+
+    private static int scaleLegacyStereoBytes(int configuredBytes, int channels, int minBytes) {
+        long scaled = (long) configuredBytes * (long) Math.max(1, channels);
+        scaled /= 2L; // legacy baseline was stereo (2 channels)
+        return (int) Math.max(minBytes, Math.min(Integer.MAX_VALUE, scaled));
     }
 }

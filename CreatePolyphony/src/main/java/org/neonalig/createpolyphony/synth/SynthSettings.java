@@ -8,9 +8,8 @@ import javax.sound.sampled.AudioFormat;
  * <p>Defaults are chosen to give responsive, low-glitch playback on a
  * mid-range CPU while keeping memory use modest:</p>
  * <ul>
- *   <li><b>44.1 kHz / 16-bit / stereo PCM</b> - the format most sf2 banks
- *       are authored at; resampling cost is minimal and OpenAL accepts
- *       it natively without re-conversion.</li>
+ *   <li><b>44.1 kHz / 16-bit / mono PCM</b> - OpenAL only spatializes mono
+ *       sources, so this enables holder-position panning and distance falloff.</li>
  *   <li><b>32-voice polyphony cap</b> - generous for hand-played music,
  *       low enough that even a busy MIDI track never spikes a single
  *       core. Configurable via {@link org.neonalig.createpolyphony.Config}.</li>
@@ -43,11 +42,11 @@ public record SynthSettings(
     public static SynthSettings defaults() {
         return new SynthSettings(
             44_100f,
-            2,
+            1,
             16,
             32,
-            // 250 ms of stereo 16-bit @ 44.1 kHz =~ 44100 * 2 * 2 * 0.25 = 44100 bytes
-            44_100,
+            // 250 ms of mono 16-bit @ 44.1 kHz =~ 44100 * 1 * 2 * 0.25 = 22050 bytes
+            22_050,
             // 4 KiB chunks =~ 11 ms at the above format
             4_096
         );

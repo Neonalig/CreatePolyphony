@@ -15,6 +15,9 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerChangedDimensionEvent;
+import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
@@ -108,6 +111,28 @@ public final class PolyphonyInteractionHandler {
         if (event.getEntity() instanceof ServerPlayer player) {
             PolyphonyLinkManager.syncPlayerHeldLinks(player);
         }
+    }
+
+    @SubscribeEvent
+    public static void onLevelTick(LevelTickEvent.Post event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            PolyphonyLinkManager.onLevelTick(level);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onEntityLeaveLevel(EntityLeaveLevelEvent event) {
+        if (!(event.getLevel() instanceof ServerLevel)) return;
+        if (event.getEntity() instanceof ServerPlayer) return;
+        PolyphonyLinkManager.onNonPlayerHolderRemoved(event.getEntity().getUUID());
+    }
+
+    @SubscribeEvent
+    public static void onPlayerChangedDimension(PlayerChangedDimensionEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        // Panic-clear notes from the old dimension, then re-sync held links.
+        PolyphonyLinkManager.onPlayerChangedDimension(player);
+        PolyphonyLinkManager.syncPlayerHeldLinks(player);
     }
 
 

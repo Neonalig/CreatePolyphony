@@ -51,12 +51,12 @@ import java.util.concurrent.CompletableFuture;
  * {@code SoundEvent} required. (3) just hands back our PCM bridge.</p>
  *
  * <h2>Spatial behaviour</h2>
- * <p>The instance is anchored to the local player and ticked to follow
- * them. Attenuation is set to {@code NONE} because synth output is
- * conceptually "in the player's ears" - they're playing it themselves.
- * If we ever want spatial behaviour (e.g. another player's instrument
- * audible at distance), we'd swap to {@code LINEAR} and feed an
- * {@link net.minecraft.world.entity.Entity} position instead.</p>
+ * <p>The stream is world-positioned ({@code relative=false}, {@code attenuation=LINEAR}).
+ * When the local player is the holder ({@code selfPlay=true}) the source tracks the
+ * player's position (distance ≈ 0 → full volume, centre pan — "in ears" feel).
+ * When the source is an external holder (mob, deployer — {@code selfPlay=false}) it
+ * stays at the holder's last reported world position so OpenAL applies correct
+ * distance falloff and stereo panning relative to the listener.</p>
  */
 @OnlyIn(Dist.CLIENT)
 public final class PolyphonySynthSoundInstance extends AbstractSoundInstance implements TickableSoundInstance {
@@ -68,14 +68,23 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
     private final PolyphonySynthesizer synth;
     private final Sound syntheticSound;
     private final WeighedSoundEvents syntheticEvents;
+    private final int maxDistanceBlocks;
     private boolean stopped = false;
 
-    public PolyphonySynthSoundInstance(PolyphonySynthesizer synth) {
+    /**
+     * When {@code true} (default) the stream is anchored to the listener's ears
+     * (player is the holder). When {@code false} the stream is positioned at
+     * {@code (srcX, srcY, srcZ)} in world space for external-source spatial audio.
+     */
+    private volatile boolean selfPlay = true;
+    private volatile float srcX, srcY, srcZ;
+
+    public PolyphonySynthSoundInstance(PolyphonySynthesizer synth, int maxDistanceBlocks) {
         super(SYNTH_LOCATION, Config.synthSoundSource(), RandomSource.create());
         this.synth = synth;
-        // Build a Sound with stream=true so SoundEngine routes through our getStream() override
-        // rather than the static-buffer path. The path/location values don't matter because
-        // SoundBufferLibrary is never asked to resolve them.
+        this.maxDistanceBlocks = Math.max(16, maxDistanceBlocks);
+        // attenuationDistance is expressed in 16-block sound units.
+        int attenuationField = Math.max(1, this.maxDistanceBlocks / 16);
         this.syntheticSound = new Sound(
             SYNTH_LOCATION,
             ConstantFloat.of(1.0F),
@@ -84,18 +93,24 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
             Sound.Type.FILE,
             true,                 // stream
             false,                // preload
-            16                    // attenuation distance (unused with attenuation=NONE)
+            attenuationField      // attenuation distance (in SoundManager units)
         );
         this.sound = syntheticSound;
         this.syntheticEvents = new WeighedSoundEvents(SYNTH_LOCATION, null);
 
-        // Default placement; tick() repositions to the player every frame.
         this.volume = 1.0F;
         this.pitch = 1.0F;
-        this.looping = true;        // streaming sounds shouldn't auto-finish; the synth runs forever
+        this.looping = true;
         this.delay = 0;
-        this.relative = true;       // attached-to-listener, not world space
-        this.attenuation = Attenuation.NONE;
+        // relative=false: world-space positioning so OpenAL computes 3D panning.
+        // For self-play the source tracks the player (distance ≈ 0 → full volume,
+        // centre pan). For external sources the source stays at the holder position.
+        this.relative = false;
+        this.attenuation = Attenuation.LINEAR;
+    }
+
+    public int maxDistanceBlocks() {
+        return maxDistanceBlocks;
     }
 
     /**
@@ -128,23 +143,46 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         this.looping = false;
     }
 
+    /**
+     * Update the world-space position of the sound source.
+     *
+     * @param x         world X of the holder / source.
+     * @param y         world Y.
+     * @param z         world Z.
+     * @param selfPlay  {@code true} = the local player is the holder (source tracks
+     *                  the listener, effectively "in ears"); {@code false} = external
+     *                  source at the supplied world position.
+     */
+    public void setSourcePosition(float x, float y, float z, boolean selfPlay) {
+        this.srcX = x;
+        this.srcY = y;
+        this.srcZ = z;
+        this.selfPlay = selfPlay;
+    }
+
     @Override
     public void tick() {
-        // Follow the local player so the sound never falls outside attenuation
-        // range. We've set attenuation=NONE anyway, but this also keeps things
-        // sensible if the user mods that to LINEAR for distant playback.
         LocalPlayer p = Minecraft.getInstance().player;
         if (p == null) {
             stopped = true;
             return;
         }
-        this.x = p.getX();
-        this.y = p.getY();
-        this.z = p.getZ();
 
-        // Defensive: if the synth was closed out from under us (e.g. soundfont
-        // swap that rebuilt the synth), we should also retire so a fresh
-        // instance can take over.
+        if (selfPlay) {
+            // Player is the holder: anchor source to the listener so the sound
+            // plays at full volume with centre panning (equivalent to "in ears").
+            this.x = p.getX();
+            this.y = p.getY();
+            this.z = p.getZ();
+        } else {
+            // External source: keep at the last-reported holder position so
+            // OpenAL computes correct distance attenuation and stereo panning.
+            this.x = srcX;
+            this.y = srcY;
+            this.z = srcZ;
+        }
+
+        // Defensive: retire if the synth was closed (e.g. soundfont swap).
         if (synth.isClosed()) {
             stopped = true;
         }
