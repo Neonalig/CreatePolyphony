@@ -1,5 +1,6 @@
 package org.neonalig.createpolyphony;
 
+import net.minecraft.sounds.SoundSource;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 import org.neonalig.createpolyphony.synth.SynthSettings;
@@ -45,6 +46,10 @@ public class Config {
         .comment("If true, One Man Band uses raw MIDI programs for full GM playback.",
             "If false, One Man Band snaps to supported instrument families only.")
         .define("oneManBandUseAllGmPrograms", false);
+
+    public static final ModConfigSpec.EnumValue<SoundSource> SYNTH_SOUND_SOURCE = BUILDER
+        .comment("Which Minecraft volume slider controls instrument synth playback.")
+        .defineEnum("synthSoundSource", SoundSource.RECORDS);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -100,6 +105,10 @@ public class Config {
 
     public static boolean oneManBandUsesAllGmPrograms() {
         return ONE_MAN_BAND_USE_ALL_GM_PROGRAMS.get();
+    }
+
+    public static SoundSource synthSoundSource() {
+        return SYNTH_SOUND_SOURCE.get();
     }
 
     public static SynthSettings synthSettings() {
