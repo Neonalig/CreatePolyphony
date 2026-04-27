@@ -99,13 +99,13 @@ public final class PolyphonyClientNoteHandler {
         int velocity = payload.velocity() & 0x7F;
         int program = payload.program() & 0x7F;
 
-        // Apply program change lazily: only when this channel hasn't seen this program before.
-        if (lastProgram[channel] != program) {
-            synth.programChange(channel, program);
-            lastProgram[channel] = program;
-        }
-
         if (payload.isNoteOn()) {
+            // Program is only meaningful for NoteOn; applying it here prevents NoteOff-only
+            // safety packets from altering timbre state on the channel.
+            if (lastProgram[channel] != program) {
+                synth.programChange(channel, program);
+                lastProgram[channel] = program;
+            }
             synth.noteOn(channel, note, velocity);
             debugNote("note-on", payload);
         } else if (payload.isNoteOff()) {
