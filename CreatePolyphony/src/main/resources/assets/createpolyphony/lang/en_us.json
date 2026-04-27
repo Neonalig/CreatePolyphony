@@ -31,6 +31,8 @@
 
   "message.createpolyphony.linked": "Linked to Tracker Bar - notes for %s will route to your %s",
   "message.createpolyphony.unlinked": "Unlinked from Tracker Bar",
+  "command.createpolyphony.unlink.success": "Unlinked your current instrument.",
+  "command.createpolyphony.unlink.failed": "Your current held item is not a linked instrument.",
 
   "screen.createpolyphony.soundfont.title": "SoundFont Settings",
   "screen.createpolyphony.soundfont.none": "None / No Sound",
