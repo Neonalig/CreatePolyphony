@@ -1,0 +1,33 @@
+﻿{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:piano"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.piano.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.piano.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_piano": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:piano"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

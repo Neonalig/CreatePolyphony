@@ -1,0 +1,40 @@
+﻿{
+  "parent": "createpolyphony:polyphony/linked_up",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:violin"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.jam_session.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.jam_session.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "share_with_any_entity": {
+      "trigger": "minecraft:player_interacted_with_entity",
+      "conditions": {
+        "item": {
+          "items": [
+            "createpolyphony:piano",
+            "createpolyphony:acoustic_guitar",
+            "createpolyphony:electric_guitar",
+            "createpolyphony:bass_guitar",
+            "createpolyphony:violin",
+            "createpolyphony:trumpet",
+            "createpolyphony:flute",
+            "createpolyphony:accordion",
+            "createpolyphony:drum_kit",
+            "createpolyphony:one_man_band"
+          ]
+        }
+      }
+    }
+  }
+}
+

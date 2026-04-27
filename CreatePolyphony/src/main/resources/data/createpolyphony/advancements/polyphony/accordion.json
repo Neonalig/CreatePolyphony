@@ -1,0 +1,33 @@
+﻿{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:accordion"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.accordion.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.accordion.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_accordion": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:accordion"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

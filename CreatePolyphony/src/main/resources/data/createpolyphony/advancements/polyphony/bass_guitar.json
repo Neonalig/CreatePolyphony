@@ -1,0 +1,33 @@
+﻿{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:bass_guitar"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.bass_guitar.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.bass_guitar.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_bass_guitar": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:bass_guitar"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

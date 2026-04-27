@@ -1,0 +1,33 @@
+﻿{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:violin"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.violin.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.violin.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_violin": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:violin"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+

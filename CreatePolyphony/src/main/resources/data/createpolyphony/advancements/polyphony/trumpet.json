@@ -1,0 +1,33 @@
+﻿{
+  "parent": "createpolyphony:polyphony/root",
+  "display": {
+    "icon": {
+      "id": "createpolyphony:trumpet"
+    },
+    "title": {
+      "translate": "advancements.createpolyphony.polyphony.trumpet.title"
+    },
+    "description": {
+      "translate": "advancements.createpolyphony.polyphony.trumpet.description"
+    },
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "have_trumpet": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:trumpet"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
+
