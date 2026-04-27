@@ -22,6 +22,7 @@ public final class SoundFontPickerScreen extends Screen {
     private static final Component TITLE = Component.translatable("screen.createpolyphony.soundfont.title");
     private static final Component NONE_LABEL = Component.translatable("screen.createpolyphony.soundfont.none");
     private static final Component LOADING_LABEL = Component.translatable("screen.createpolyphony.soundfont.loading");
+    private static final String WARNING_PREFIX = "[!] ";
 
     private final SoundFontManager manager;
     private final Consumer<SoundFontManager> managerListener;
@@ -233,9 +234,15 @@ public final class SoundFontPickerScreen extends Screen {
                 boolean isActive = Objects.equals(fileName, active);
                 String pending = manager.pending();
                 boolean isPending = manager.isLoading() && Objects.equals(fileName, pending);
+                boolean hasWarning = manager.hasSessionLoadFailure(fileName);
                 Component text = fileName == null ? NONE_LABEL : Component.literal(fileName);
-                int color = isActive ? 0x7CFF7C : (isPending ? 0xFFE37C : 0xFFFFFF);
-                guiGraphics.drawString(SoundFontPickerScreen.this.font, text, left + 6, top + 6, color, false);
+                int color = isActive ? 0x7CFF7C : (isPending ? 0xFFE37C : (hasWarning ? 0xFFD37C : 0xFFFFFF));
+                int x = left + 6;
+                if (hasWarning) {
+                    guiGraphics.drawString(SoundFontPickerScreen.this.font, WARNING_PREFIX, x, top + 6, 0xFFE37C, false);
+                    x += SoundFontPickerScreen.this.font.width(WARNING_PREFIX);
+                }
+                guiGraphics.drawString(SoundFontPickerScreen.this.font, text, x, top + 6, color, false);
             }
 
             @Override
@@ -252,7 +259,11 @@ public final class SoundFontPickerScreen extends Screen {
 
             @Override
             public Component getNarration() {
-                return fileName == null ? NONE_LABEL : Component.literal(fileName);
+                if (fileName == null) return NONE_LABEL;
+                if (manager.hasSessionLoadFailure(fileName)) {
+                    return Component.translatable("screen.createpolyphony.soundfont.warning_narration", fileName);
+                }
+                return Component.literal(fileName);
             }
         }
     }

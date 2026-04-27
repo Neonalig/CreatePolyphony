@@ -1,6 +1,8 @@
 package org.neonalig.createpolyphony.client.sound;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.toasts.SystemToast;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.Nullable;
@@ -22,7 +24,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -115,6 +119,7 @@ public final class SoundFontManager {
     private volatile boolean loading = false;
     @Nullable private volatile String pendingName = null;
     private final AtomicInteger loadProgressPercent = new AtomicInteger(0);
+    private final Set<String> sessionLoadFailures = ConcurrentHashMap.newKeySet();
 
     private SoundFontManager(Path directory, @Nullable PolyphonySynthesizer synth) throws IOException {
         this.directory = directory;
@@ -232,6 +237,10 @@ public final class SoundFontManager {
         return synth != null;
     }
 
+    public boolean hasSessionLoadFailure(@Nullable String fileName) {
+        return fileName != null && sessionLoadFailures.contains(fileName);
+    }
+
     public void addListener(Consumer<SoundFontManager> listener) {
         listeners.add(Objects.requireNonNull(listener));
     }
@@ -338,18 +347,46 @@ public final class SoundFontManager {
         }
         activeLoadTask = null;
         if (success) {
+            sessionLoadFailures.remove(fileName);
             activeName = fileName;
             persistSelection();
             CreatePolyphony.LOGGER.info("Activated soundfont {}", fileName);
         } else {
+            sessionLoadFailures.add(fileName);
             activeName = null;
             if (error != null) {
                 CreatePolyphony.LOGGER.error("Failed to load soundfont {}", directory.resolve(fileName), error);
             }
+            reportLoadFailureToUser(fileName, error);
         }
         loading = false;
         pendingName = null;
         loadProgressPercent.set(0);
+        notifyListeners();
+    }
+
+    private void reportLoadFailureToUser(String fileName, @Nullable Throwable error) {
+        Minecraft mc = Minecraft.getInstance();
+        Component reason = describeError(error);
+        Component title = Component.translatable("toast.createpolyphony.soundfont.load_failed.title");
+        Component body = Component.translatable("toast.createpolyphony.soundfont.load_failed.body", fileName, reason);
+        SystemToast.add(mc.getToasts(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION, title, body);
+        if (mc.player != null) {
+            mc.player.displayClientMessage(
+                Component.translatable("message.createpolyphony.soundfont.load_failed_chat", fileName, reason),
+                false);
+        }
+    }
+
+    private static Component describeError(@Nullable Throwable error) {
+        if (error == null) {
+            return Component.translatable("message.createpolyphony.soundfont.error.unknown");
+        }
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return Component.literal(error.getClass().getSimpleName());
+        }
+        return Component.literal(message);
     }
 
     public void rescan() {

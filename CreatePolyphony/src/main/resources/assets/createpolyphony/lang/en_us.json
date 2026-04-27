@@ -44,7 +44,13 @@
   "hud.createpolyphony.soundfont.loading": "Loading soundfont...",
   "screen.createpolyphony.soundfont.loading": "Loading soundfont...",
   "screen.createpolyphony.soundfont.loading_name": "Loading: %s",
+  "screen.createpolyphony.soundfont.warning_narration": "%s, warning: failed to load in this session",
   "screen.createpolyphony.soundfont.folder": "Folder: %s",
+
+  "toast.createpolyphony.soundfont.load_failed.title": "SoundFont load failed",
+  "toast.createpolyphony.soundfont.load_failed.body": "%s: %s",
+  "message.createpolyphony.soundfont.load_failed_chat": "[Create: Polyphony] Failed to load SoundFont '%s' (%s).",
+  "message.createpolyphony.soundfont.error.unknown": "unknown error",
 
   "createpolyphony.configuration.title": "Create: Polyphony Configuration",
   "createpolyphony.configuration.section.createpolyphony.common.toml": "Common",
