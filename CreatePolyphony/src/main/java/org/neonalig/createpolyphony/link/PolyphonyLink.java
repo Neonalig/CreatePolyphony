@@ -2,10 +2,8 @@ package org.neonalig.createpolyphony.link;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
-import org.neonalig.createpolyphony.instrument.InstrumentItem;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -13,17 +11,18 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * The set of players currently linked to a single Sound-of-Steam Tracker Bar
  * block, plus the per-MIDI-channel routing decision derived from those players'
- * held instruments.
+ * held instruments (main and off hand can both participate).
  *
  * <p><b>Channel distribution algorithm</b> (recomputed every time the membership
  * or instrument-program state changes):</p>
  * <ol>
- *   <li>If exactly <em>one</em> player is linked:
+ *   <li>If exactly <em>one</em> participant is linked:
  *       <ul>
  *         <li>Non-drum holder: receives every <em>melodic</em> channel (all except 9).</li>
  *         <li>Drum-kit holder: receives only channel 9.</li>
@@ -34,13 +33,11 @@ import java.util.UUID;
  *         <li>Determine the channel's "preferred" {@link InstrumentFamily} from
  *             its current GM program (or {@link InstrumentFamily#DRUM_KIT} for
  *             channel 9 by GM convention).</li>
- *         <li>Among the linked players, pick one whose held instrument's family
- *             matches that preferred family. Ties are broken by least-loaded
- *             player (fewest channels assigned so far) to keep load balanced.</li>
- *         <li>If no holder matches, fall back to deterministic least-loaded
- *             round-robin across all <em>eligible</em> linked instruments so
- *             the whole song can still be covered where possible. Drum channel
- *             fallback remains drum-kit-only.</li>
+ *       <li>Among linked participants, first claim channels whose preferred
+ *             family is directly matched.</li>
+ *         <li>After all preferred claims, assign any unclaimed channels via
+ *             deterministic round-robin over eligible participants so remaining
+ *             channels are split evenly.</li>
  *       </ol>
  *   </li>
  * </ol>
@@ -61,16 +58,16 @@ public final class PolyphonyLink {
     private final BlockPos pos;
 
     /**
-     * Linked players, keyed by UUID. {@link LinkedHashMap} so iteration order is
-     * stable (= link order), which makes round-robin assignment deterministic.
+     * Linked players, keyed by UUID. {@link LinkedHashMap} keeps insertion order
+     * stable, which makes participant ordering deterministic.
      */
     private final LinkedHashMap<UUID, LinkedPlayer> players = new LinkedHashMap<>();
 
     /** Last seen GM program number per MIDI channel (0-15). -1 means "unknown / not yet seen". */
     private final int[] channelPrograms = new int[16];
 
-    /** Cached assignment: channel index -&gt; UUID of player who plays it (or null = silent). */
-    private final UUID[] channelAssignments = new UUID[16];
+    /** Cached assignment: channel index -&gt; participant that should render it. */
+    private final ChannelAssignee[] channelAssignments = new ChannelAssignee[16];
 
     public PolyphonyLink(String levelKey, BlockPos pos) {
         this.levelKey = levelKey;
@@ -93,21 +90,20 @@ public final class PolyphonyLink {
     }
 
     /**
-     * Add or refresh a player on this link. If the player was already linked,
-     * their held-instrument record is just updated. Triggers reassignment.
+     * Add or refresh a player on this link from their current main/off-hand
+     * linked instruments. Triggers reassignment.
      *
      * @return {@code true} if this was a new link, {@code false} if it was a refresh.
      */
-    public boolean addOrRefreshPlayer(ServerPlayer player, ItemStack heldStack) {
-        InstrumentFamily family = InstrumentItem.familyOf(heldStack);
-        if (family == null) {
-            // Refusing to link an instrumentless player keeps the data model honest -
-            // the dispatcher should never call us with one anyway.
+    public boolean addOrRefreshPlayer(ServerPlayer player,
+                                      @Nullable InstrumentFamily mainHandFamily,
+                                      @Nullable InstrumentFamily offHandFamily) {
+        if (mainHandFamily == null && offHandFamily == null) {
             return false;
         }
         UUID id = player.getUUID();
         boolean isNew = !players.containsKey(id);
-        players.put(id, new LinkedPlayer(id, family));
+        players.put(id, new LinkedPlayer(id, mainHandFamily, offHandFamily));
         recomputeAssignments();
         return isNew;
     }
@@ -151,20 +147,13 @@ public final class PolyphonyLink {
     }
 
     /**
-     * Returns the UUID of the player currently assigned to play the given MIDI
+     * Returns the participant currently assigned to play the given MIDI
      * channel, or {@code null} if no linked players exist.
      */
     @Nullable
-    public UUID assigneeFor(int channel) {
+    public ChannelAssignee assigneeFor(int channel) {
         if (channel < 0 || channel > 15) return null;
         return channelAssignments[channel];
-    }
-
-    /** Resolve the held-instrument family of a linked player, if any. */
-    @Nullable
-    public InstrumentFamily familyOf(UUID id) {
-        LinkedPlayer lp = players.get(id);
-        return lp == null ? null : lp.family();
     }
 
     // ---- internals -----------------------------------------------------------------------------
@@ -178,30 +167,28 @@ public final class PolyphonyLink {
         Arrays.fill(channelAssignments, null);
         if (players.isEmpty()) return;
 
+        List<Participant> participants = orderedParticipants();
+        if (participants.isEmpty()) return;
+
         // Solo policy: non-drum instruments cover melodic channels; drum-kit covers drums only.
         // ONE_MAN_BAND (wildcard) covers all 16 channels simultaneously.
-        if (players.size() == 1) {
-            LinkedPlayer only = players.values().iterator().next();
+        if (participants.size() == 1) {
+            Participant only = participants.get(0);
             for (int ch = 0; ch < 16; ch++) {
-                if (only.family().isWildcard()) {
-                    channelAssignments[ch] = only.id();
-                } else if (only.family() == InstrumentFamily.DRUM_KIT) {
-                    channelAssignments[ch] = (ch == 9) ? only.id() : null;
+                if (only.family.isWildcard()) {
+                    channelAssignments[ch] = only.assignee();
+                } else if (only.family == InstrumentFamily.DRUM_KIT) {
+                    channelAssignments[ch] = (ch == 9) ? only.assignee() : null;
                 } else {
-                    channelAssignments[ch] = (ch == 9) ? null : only.id();
+                    channelAssignments[ch] = (ch == 9) ? null : only.assignee();
                 }
             }
             return;
         }
 
-        // Multi-player path: preferred-family first, then deterministic least-loaded fallback.
-        // Track per-player load so both matching picks and fallback picks stay balanced.
-        Map<UUID, Integer> load = new LinkedHashMap<>();
-        for (UUID id : players.keySet()) load.put(id, 0);
-
-        // Stable iteration list for tie-breaks.
-        List<LinkedPlayer> order = new ArrayList<>(players.values());
-
+        // Phase 1: preferred-family claims.
+        int[] load = new int[participants.size()];
+        boolean[] claimed = new boolean[16];
         for (int ch = 0; ch < 16; ch++) {
             InstrumentFamily preferred = InstrumentFamily.forMidiChannelAndProgram(
                 ch,
@@ -209,50 +196,70 @@ public final class PolyphonyLink {
                 channelPrograms[ch] >= 0 ? channelPrograms[ch] : 0
             );
 
-            UUID winner = pickLeastLoadedMatching(order, load, preferred);
-            if (winner == null) {
-                winner = pickLeastLoadedEligible(order, load, ch == 9);
+            int winner = pickLeastLoadedMatching(participants, load, preferred);
+            if (winner >= 0) {
+                channelAssignments[ch] = participants.get(winner).assignee();
+                load[winner]++;
+                claimed[ch] = true;
             }
-            channelAssignments[ch] = winner;
-            if (winner != null) load.merge(winner, 1, Integer::sum);
+        }
+
+        // Phase 2: deterministic round-robin for channels left unclaimed.
+        int fallbackCursor = 0;
+        for (int ch = 0; ch < 16; ch++) {
+            if (claimed[ch]) continue;
+            int winner = pickRoundRobinEligible(participants, fallbackCursor, ch == 9);
+            if (winner < 0) continue;
+            channelAssignments[ch] = participants.get(winner).assignee();
+            load[winner]++;
+            fallbackCursor = (winner + 1) % participants.size();
         }
     }
 
-    @Nullable
-    private static UUID pickLeastLoadedMatching(List<LinkedPlayer> order,
-                                                Map<UUID, Integer> load,
-                                                InstrumentFamily preferred) {
-        UUID best = null;
+    private static int pickLeastLoadedMatching(List<Participant> participants,
+                                               int[] load,
+                                               InstrumentFamily preferred) {
+        int best = -1;
         int bestLoad = Integer.MAX_VALUE;
-        for (LinkedPlayer lp : order) {
-            // Wildcard (ONE_MAN_BAND) matches every preferred family.
-            if (lp.family() != preferred && !lp.family().isWildcard()) continue;
-            int l = load.get(lp.id());
+        for (int i = 0; i < participants.size(); i++) {
+            Participant lp = participants.get(i);
+            if (lp.family != preferred) continue;
+            int l = load[i];
             if (l < bestLoad) {
                 bestLoad = l;
-                best = lp.id();
+                best = i;
             }
         }
         return best;
     }
 
-    @Nullable
-    private static UUID pickLeastLoadedEligible(List<LinkedPlayer> order,
-                                                Map<UUID, Integer> load,
-                                                boolean drumsOnly) {
-        UUID best = null;
-        int bestLoad = Integer.MAX_VALUE;
-        for (LinkedPlayer lp : order) {
-            boolean isDrum = lp.family() == InstrumentFamily.DRUM_KIT;
+    private static int pickRoundRobinEligible(List<Participant> participants,
+                                              int cursor,
+                                              boolean drumsOnly) {
+        if (participants.isEmpty()) return -1;
+        int size = participants.size();
+        for (int i = 0; i < size; i++) {
+            int idx = (cursor + i) % size;
+            Participant p = participants.get(idx);
+            boolean isDrum = p.family == InstrumentFamily.DRUM_KIT;
             // Wildcard (ONE_MAN_BAND) is always eligible regardless of drumsOnly.
-            if (!lp.family().isWildcard() && drumsOnly != isDrum) continue;
-            int l = load.get(lp.id());
-            if (l < bestLoad) {
-                bestLoad = l;
-                best = lp.id();
+            if (!p.family.isWildcard() && drumsOnly != isDrum) continue;
+            return idx;
+        }
+        return -1;
+    }
+
+    private List<Participant> orderedParticipants() {
+        List<Participant> out = new ArrayList<>(players.size() * 2);
+        for (LinkedPlayer player : players.values()) {
+            if (player.mainHandFamily() != null) {
+                out.add(new Participant(player.id(), player.mainHandFamily()));
+            }
+            if (player.offHandFamily() != null) {
+                out.add(new Participant(player.id(), player.offHandFamily()));
             }
         }
-        return best;
+        return out;
     }
 
     /**
@@ -262,5 +269,20 @@ public final class PolyphonyLink {
      * because that's the only thing the distribution algorithm cares about,
      * and it lets us avoid keeping references to potentially-stale ItemStacks.</p>
      */
-    public record LinkedPlayer(UUID id, InstrumentFamily family) { }
+    public record LinkedPlayer(UUID id,
+                               @Nullable InstrumentFamily mainHandFamily,
+                               @Nullable InstrumentFamily offHandFamily) {
+        public LinkedPlayer {
+            Objects.requireNonNull(id, "id");
+        }
+    }
+
+    /** Immutable assignee metadata used by the note dispatcher. */
+    public record ChannelAssignee(UUID playerId, InstrumentFamily family) { }
+
+    private record Participant(UUID playerId, InstrumentFamily family) {
+        private ChannelAssignee assignee() {
+            return new ChannelAssignee(playerId, family);
+        }
+    }
 }

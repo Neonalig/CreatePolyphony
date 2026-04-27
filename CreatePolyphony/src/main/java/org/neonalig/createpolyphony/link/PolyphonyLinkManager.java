@@ -64,7 +64,7 @@ public final class PolyphonyLinkManager {
     private static final AtomicInteger NOTE_ROUTE_DEBUG_BUDGET = new AtomicInteger(64);
 
     /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
-    private static final Map<UUID, Map<LinkKey, InstrumentFamily>> ACTIVE_HAND_LINKS = new HashMap<>();
+    private static final Map<UUID, Map<LinkKey, HeldInstruments>> ACTIVE_HAND_LINKS = new HashMap<>();
     /** Active note ownership per link: (channel,note) -> player UUID currently expected to receive NoteOff. */
     private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
@@ -117,8 +117,8 @@ public final class PolyphonyLinkManager {
     /** Reconcile active link membership from linked instruments in main/off hand. */
     public static void syncPlayerHeldLinks(ServerPlayer player) {
         UUID id = player.getUUID();
-        Map<LinkKey, InstrumentFamily> desired = desiredHeldLinks(player);
-        Map<LinkKey, InstrumentFamily> current = ACTIVE_HAND_LINKS.get(id);
+        Map<LinkKey, HeldInstruments> desired = desiredHeldLinks(player);
+        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.get(id);
 
         if (current != null) {
             for (LinkKey key : Set.copyOf(current.keySet())) {
@@ -136,10 +136,10 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        for (Map.Entry<LinkKey, InstrumentFamily> entry : desired.entrySet()) {
+        for (Map.Entry<LinkKey, HeldInstruments> entry : desired.entrySet()) {
             LinkKey key = entry.getKey();
-            InstrumentFamily family = entry.getValue();
-            if (current != null && family == current.get(key)) continue;
+            HeldInstruments held = entry.getValue();
+            if (current != null && held.equals(current.get(key))) continue;
 
             PolyphonyLink link = LINKS.get(key);
             if (link == null) {
@@ -147,10 +147,7 @@ public final class PolyphonyLinkManager {
                 primeLinkProgramsFromSnapshot(key, link);
                 LINKS.put(key, link);
             }
-            ItemStack stack = findHeldStackFor(player, key, family);
-            if (!stack.isEmpty()) {
-                link.addOrRefreshPlayer(player, stack);
-            }
+            link.addOrRefreshPlayer(player, held.mainHandFamily(), held.offHandFamily());
         }
 
         if (desired.isEmpty()) {
@@ -234,40 +231,38 @@ public final class PolyphonyLinkManager {
             }
         }
 
-        UUID assignee = link.assigneeFor(channel);
+        PolyphonyLink.ChannelAssignee assignee = link.assigneeFor(channel);
         if (assignee == null) {
             debugRoute("drop:no-assignee", level, pos, status, data1, data2, null);
             return;
         }
 
-        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assignee);
+        UUID assigneePlayerId = assignee.playerId();
+
+        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneePlayerId);
         if (target == null) {
-            debugRoute("drop:no-player", level, pos, status, data1, data2, assignee);
+            debugRoute("drop:no-player", level, pos, status, data1, data2, assigneePlayerId);
             return;
         }
 
         if (!holdsLinkedInstrument(target, key)) {
             // Don't hard-drop note routing here; assignment already came from held-link sync.
-            debugRoute("warn:not-holding", level, pos, status, data1, data2, assignee);
+            debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneePlayerId);
         }
 
         // Resolve the assignee's held instrument family and force playback timbre to it.
         // This keeps player output aligned with what they're physically holding.
-        InstrumentFamily family = link.familyOf(assignee);
-        if (family == null) {
-            debugRoute("drop:no-family", level, pos, status, data1, data2, assignee);
-            return;
-        }
+        InstrumentFamily family = assignee.family();
 
         // Safety belt: even if assignment data got stale, keep drums isolated.
         // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
         if (!family.isWildcard()) {
             if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assignee);
+                debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
                 return;
             }
             if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assignee);
+                debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
                 return;
             }
         }
@@ -287,24 +282,24 @@ public final class PolyphonyLinkManager {
             program = (channel == 9) ? 127 : family.canonicalGmProgram();
         }
 
-        if (sendNotePacket(level, assignee, program, channel, command, note, velocity)) {
+        if (sendNotePacket(level, assigneePlayerId, program, channel, command, note, velocity)) {
             if (!noteOff) {
-                UUID previousOwner = trackNoteOwner(key, activeNoteKey, assignee);
-                if (previousOwner != null && !Objects.equals(previousOwner, assignee)) {
+                UUID previousOwner = trackNoteOwner(key, activeNoteKey, assigneePlayerId);
+                if (previousOwner != null && !Objects.equals(previousOwner, assigneePlayerId)) {
                     sendNotePacket(level, previousOwner, 0, channel, 0x80, note, 0);
                     debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
                 }
             }
-            debugRoute("sent", level, pos, status, data1, data2, assignee);
+            debugRoute("sent", level, pos, status, data1, data2, assigneePlayerId);
         } else {
-            debugRoute("drop:no-player", level, pos, status, data1, data2, assignee);
+            debugRoute("drop:no-player", level, pos, status, data1, data2, assigneePlayerId);
         }
     }
 
     /** Drop active held-link participation for a logging-out player. */
     public static void onPlayerLogout(ServerPlayer player) {
         UUID id = player.getUUID();
-        Map<LinkKey, InstrumentFamily> current = ACTIVE_HAND_LINKS.remove(id);
+        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(id);
         if (current == null) return;
         for (LinkKey key : current.keySet()) {
             forceStopNotesOwnedBy(slFrom(player), key, id);
@@ -376,35 +371,29 @@ public final class PolyphonyLinkManager {
         return InstrumentItem.familyOf(off) != null && InstrumentLinkData.matches(off, key);
     }
 
-    private static Map<LinkKey, InstrumentFamily> desiredHeldLinks(ServerPlayer player) {
-        Map<LinkKey, InstrumentFamily> desired = new HashMap<>();
-        // Off-hand takes precedence when both hands are linked to the same tracker.
-        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND), false);
+    private static Map<LinkKey, HeldInstruments> desiredHeldLinks(ServerPlayer player) {
+        Map<LinkKey, HeldInstruments> desired = new HashMap<>();
         collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.MAINHAND), true);
+        collectHeldLink(desired, player.getItemBySlot(EquipmentSlot.OFFHAND), false);
         return desired;
     }
 
-    private static void collectHeldLink(Map<LinkKey, InstrumentFamily> out, ItemStack stack, boolean onlyIfAbsent) {
+    private static void collectHeldLink(Map<LinkKey, HeldInstruments> out, ItemStack stack, boolean mainHand) {
         InstrumentFamily family = InstrumentItem.familyOf(stack);
         if (family == null) return;
         InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
         if (target == null) return;
         LinkKey key = new LinkKey(target.levelPath(), target.pos().immutable());
-        if (onlyIfAbsent) {
-            out.putIfAbsent(key, family);
+        HeldInstruments prior = out.get(key);
+        if (prior == null) {
+            out.put(key, mainHand
+                ? new HeldInstruments(family, null)
+                : new HeldInstruments(null, family));
         } else {
-            out.put(key, family);
+            out.put(key, mainHand
+                ? prior.withMainHand(family)
+                : prior.withOffHand(family));
         }
-    }
-
-    private static ItemStack findHeldStackFor(ServerPlayer player, LinkKey key, InstrumentFamily family) {
-        ItemStack main = player.getItemBySlot(EquipmentSlot.MAINHAND);
-        if (InstrumentItem.familyOf(main) == family && InstrumentLinkData.matches(main, key)) return main;
-
-        ItemStack off = player.getItemBySlot(EquipmentSlot.OFFHAND);
-        if (InstrumentItem.familyOf(off) == family && InstrumentLinkData.matches(off, key)) return off;
-
-        return ItemStack.EMPTY;
     }
 
     private static int trackedProgramFor(LinkKey key, int channel, PolyphonyLink link) {
@@ -464,6 +453,17 @@ public final class PolyphonyLinkManager {
         }
         @Override public String toString() {
             return levelPath + "@" + pos.toShortString();
+        }
+    }
+
+    private record HeldInstruments(@Nullable InstrumentFamily mainHandFamily,
+                                   @Nullable InstrumentFamily offHandFamily) {
+        private HeldInstruments withMainHand(InstrumentFamily family) {
+            return new HeldInstruments(family, offHandFamily);
+        }
+
+        private HeldInstruments withOffHand(InstrumentFamily family) {
+            return new HeldInstruments(mainHandFamily, family);
         }
     }
 
