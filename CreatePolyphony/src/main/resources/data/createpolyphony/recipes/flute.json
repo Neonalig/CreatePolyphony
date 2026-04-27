@@ -8,10 +8,10 @@
   ],
   "key": {
     "S": {
-      "item": "minecraft:bamboo"
+      "tag": "createpolyphony:instrument_rods"
     },
     "G": {
-      "item": "minecraft:gold_nugget"
+      "tag": "createpolyphony:instrument_gold_nuggets"
     }
   },
   "result": {
@@ -19,4 +19,3 @@
     "count": 1
   }
 }
-

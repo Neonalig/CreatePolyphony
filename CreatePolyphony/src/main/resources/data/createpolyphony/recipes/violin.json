@@ -8,10 +8,10 @@
   ],
   "key": {
     "S": {
-      "item": "minecraft:stick"
+      "tag": "createpolyphony:instrument_strings"
     },
     "P": {
-      "item": "minecraft:oak_planks"
+      "tag": "createpolyphony:instrument_planks"
     }
   },
   "result": {
@@ -19,4 +19,3 @@
     "count": 1
   }
 }
-

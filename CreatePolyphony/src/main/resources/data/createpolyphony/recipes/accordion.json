@@ -8,13 +8,13 @@
   ],
   "key": {
     "L": {
-      "item": "minecraft:leather"
+      "tag": "createpolyphony:instrument_leathers"
     },
     "P": {
-      "item": "minecraft:paper"
+      "tag": "createpolyphony:instrument_papers"
     },
     "I": {
-      "item": "minecraft:iron_nugget"
+      "tag": "createpolyphony:instrument_iron_nuggets"
     }
   },
   "result": {
@@ -22,4 +22,3 @@
     "count": 1
   }
 }
-

@@ -1,0 +1,11 @@
+﻿{
+  "replace": false,
+  "values": [
+    "minecraft:copper_ingot",
+    {
+      "id": "#c:copper_ingots",
+      "required": false
+    }
+  ]
+}
+

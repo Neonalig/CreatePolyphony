@@ -8,10 +8,10 @@
   ],
   "key": {
     "G": {
-      "item": "minecraft:gold_nugget"
+      "tag": "createpolyphony:instrument_gold_nuggets"
     },
     "I": {
-      "item": "minecraft:copper_ingot"
+      "tag": "createpolyphony:instrument_copper_ingots"
     }
   },
   "result": {
@@ -19,4 +19,3 @@
     "count": 1
   }
 }
-
