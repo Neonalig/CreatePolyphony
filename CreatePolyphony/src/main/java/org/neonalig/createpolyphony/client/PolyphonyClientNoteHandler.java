@@ -83,6 +83,13 @@ public final class PolyphonyClientNoteHandler {
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return;
 
+        // Special admin broadcast: use command 0xF0 to mean "panic" and force local stop.
+        if ((payload.command() & 0xF0) == 0xF0) {
+            debugNote("panic", payload);
+            panic();
+            return;
+        }
+
         PolyphonySynthesizer synth = currentSynth();
         if (synth == null) {
             // No active soundfont selected (or synth boot failed) - silently drop.
