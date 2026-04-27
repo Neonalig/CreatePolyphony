@@ -189,7 +189,7 @@
       }
     },
     "shared_with_entity": {
-      "trigger": "minecraft:player_interacted_with_entity",
+      "trigger": "minecraft:thrown_item_picked_up_by_entity",
       "conditions": {
         "item": {
           "items": [

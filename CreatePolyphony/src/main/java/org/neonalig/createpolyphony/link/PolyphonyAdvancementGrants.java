@@ -137,10 +137,12 @@ public final class PolyphonyAdvancementGrants {
             return;
         }
 
-        ItemStack oneManBand = new ItemStack(org.neonalig.createpolyphony.registry.CPItems.BY_FAMILY
+        var oneManBandItem = org.neonalig.createpolyphony.registry.CPItems.BY_FAMILY
             .get(InstrumentFamily.ONE_MAN_BAND)
-            .get());
-        if (!player.getInventory().contains(oneManBand)) {
+            .get();
+        boolean hasOneManBand = player.getInventory().items.stream().anyMatch(s -> s.is(oneManBandItem))
+            || player.getInventory().offhand.stream().anyMatch(s -> s.is(oneManBandItem));
+        if (!hasOneManBand) {
             return;
         }
 
