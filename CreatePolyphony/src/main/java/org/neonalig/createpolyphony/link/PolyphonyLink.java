@@ -1,6 +1,7 @@
 package org.neonalig.createpolyphony.link;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 
@@ -67,6 +68,8 @@ public final class PolyphonyLink {
 
     /** Cached assignment: channel index -&gt; participant that should render it. */
     private final ChannelAssignee[] channelAssignments = new ChannelAssignee[16];
+    /** Optional per-channel instrument item filter copied from tracker frequency slots. */
+    private final Item[] channelFilterItems = new Item[16];
 
     public PolyphonyLink(String levelKey, BlockPos pos) {
         this.levelKey = levelKey;
@@ -96,14 +99,36 @@ public final class PolyphonyLink {
      */
     public boolean addOrRefreshPlayer(UUID holderId,
                                       @Nullable InstrumentFamily mainHandFamily,
-                                      @Nullable InstrumentFamily offHandFamily) {
+                                      @Nullable InstrumentFamily offHandFamily,
+                                      @Nullable Item mainHandItem,
+                                      @Nullable Item offHandItem) {
         if (mainHandFamily == null && offHandFamily == null) {
             return false;
         }
         boolean isNew = !players.containsKey(holderId);
-        players.put(holderId, new LinkedPlayer(holderId, mainHandFamily, offHandFamily));
+        players.put(holderId, new LinkedPlayer(holderId, mainHandFamily, offHandFamily, mainHandItem, offHandItem));
         recomputeAssignments();
         return isNew;
+    }
+
+    /**
+     * Copies tracker frequency item filters for channels 0-15.
+     *
+     * <p>Only Create: Polyphony instrument items should be supplied; channels with
+     * {@code null} stay unrestricted and continue using default channel assignment.</p>
+     */
+    public void setChannelInstrumentFilters(@Nullable Item[] filters) {
+        boolean changed = false;
+        for (int ch = 0; ch < 16; ch++) {
+            Item next = (filters != null && ch < filters.length) ? filters[ch] : null;
+            if (channelFilterItems[ch] != next) {
+                channelFilterItems[ch] = next;
+                changed = true;
+            }
+        }
+        if (changed) {
+            recomputeAssignments();
+        }
     }
 
     /**
@@ -168,18 +193,11 @@ public final class PolyphonyLink {
         List<Participant> participants = orderedParticipants();
         if (participants.isEmpty()) return;
 
-        // Solo policy: non-drum instruments cover melodic channels; drum-kit covers drums only.
-        // ONE_MAN_BAND (wildcard) covers all 16 channels simultaneously.
+        // Solo policy with optional channel-filter overrides from tracker frequency keys.
         if (participants.size() == 1) {
             Participant only = participants.get(0);
             for (int ch = 0; ch < 16; ch++) {
-                if (only.family.isWildcard()) {
-                    channelAssignments[ch] = only.assignee();
-                } else if (only.family == InstrumentFamily.DRUM_KIT) {
-                    channelAssignments[ch] = (ch == 9) ? only.assignee() : null;
-                } else {
-                    channelAssignments[ch] = (ch == 9) ? null : only.assignee();
-                }
+                channelAssignments[ch] = isEligibleForChannel(only, ch) ? only.assignee() : null;
             }
             return;
         }
@@ -194,7 +212,7 @@ public final class PolyphonyLink {
                 channelPrograms[ch] >= 0 ? channelPrograms[ch] : 0
             );
 
-            int winner = pickLeastLoadedMatching(participants, load, preferred);
+            int winner = pickLeastLoadedMatching(participants, load, preferred, ch);
             if (winner >= 0) {
                 channelAssignments[ch] = participants.get(winner).assignee();
                 load[winner]++;
@@ -206,7 +224,7 @@ public final class PolyphonyLink {
         int fallbackCursor = 0;
         for (int ch = 0; ch < 16; ch++) {
             if (claimed[ch]) continue;
-            int winner = pickRoundRobinEligible(participants, fallbackCursor, ch == 9);
+            int winner = pickRoundRobinEligible(participants, fallbackCursor, ch);
             if (winner < 0) continue;
             channelAssignments[ch] = participants.get(winner).assignee();
             load[winner]++;
@@ -216,12 +234,14 @@ public final class PolyphonyLink {
 
     private static int pickLeastLoadedMatching(List<Participant> participants,
                                                int[] load,
-                                               InstrumentFamily preferred) {
+                                               InstrumentFamily preferred,
+                                               int channel) {
         int best = -1;
         int bestLoad = Integer.MAX_VALUE;
         for (int i = 0; i < participants.size(); i++) {
             Participant lp = participants.get(i);
             if (lp.family != preferred) continue;
+            if (!isEligibleForChannel(lp, channel)) continue;
             int l = load[i];
             if (l < bestLoad) {
                 bestLoad = l;
@@ -233,31 +253,53 @@ public final class PolyphonyLink {
 
     private static int pickRoundRobinEligible(List<Participant> participants,
                                               int cursor,
-                                              boolean drumsOnly) {
+                                               int channel) {
         if (participants.isEmpty()) return -1;
         int size = participants.size();
         for (int i = 0; i < size; i++) {
             int idx = (cursor + i) % size;
             Participant p = participants.get(idx);
-            boolean isDrum = p.family == InstrumentFamily.DRUM_KIT;
-            // Wildcard (ONE_MAN_BAND) is always eligible regardless of drumsOnly.
-            if (!p.family.isWildcard() && drumsOnly != isDrum) continue;
+            if (!isEligibleForChannel(p, channel)) continue;
             return idx;
         }
         return -1;
+    }
+
+    private static boolean isEligibleForChannel(Participant p, int channel) {
+        if (!p.family.isWildcard()) {
+            if (p.family == InstrumentFamily.DRUM_KIT) {
+                if (channel != 9) return false;
+            } else if (channel == 9) {
+                return false;
+            }
+        }
+
+        if (p.filteredMask == 0) return true;
+        return (p.filteredMask & (1 << channel)) != 0;
     }
 
     private List<Participant> orderedParticipants() {
         List<Participant> out = new ArrayList<>(players.size() * 2);
         for (LinkedPlayer player : players.values()) {
             if (player.mainHandFamily() != null) {
-                out.add(new Participant(player.id(), player.mainHandFamily()));
+                out.add(new Participant(player.id(), player.mainHandFamily(), channelMaskForItem(player.mainHandItem())));
             }
             if (player.offHandFamily() != null) {
-                out.add(new Participant(player.id(), player.offHandFamily()));
+                out.add(new Participant(player.id(), player.offHandFamily(), channelMaskForItem(player.offHandItem())));
             }
         }
         return out;
+    }
+
+    private int channelMaskForItem(@Nullable Item instrumentItem) {
+        if (instrumentItem == null) return 0;
+        int mask = 0;
+        for (int ch = 0; ch < 16; ch++) {
+            if (channelFilterItems[ch] == instrumentItem) {
+                mask |= (1 << ch);
+            }
+        }
+        return mask;
     }
 
     /**
@@ -269,7 +311,9 @@ public final class PolyphonyLink {
      */
     public record LinkedPlayer(UUID id,
                                @Nullable InstrumentFamily mainHandFamily,
-                               @Nullable InstrumentFamily offHandFamily) {
+                               @Nullable InstrumentFamily offHandFamily,
+                               @Nullable Item mainHandItem,
+                               @Nullable Item offHandItem) {
         public LinkedPlayer {
             Objects.requireNonNull(id, "id");
         }
@@ -278,7 +322,7 @@ public final class PolyphonyLink {
     /** Immutable assignee metadata used by the note dispatcher. */
     public record ChannelAssignee(UUID playerId, InstrumentFamily family) { }
 
-    private record Participant(UUID playerId, InstrumentFamily family) {
+    private record Participant(UUID playerId, InstrumentFamily family, int filteredMask) {
         private ChannelAssignee assignee() {
             return new ChannelAssignee(playerId, family);
         }

@@ -10,8 +10,10 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
@@ -22,7 +24,9 @@ import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
 import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.items.ItemStackHandler;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -84,6 +88,11 @@ public final class PolyphonyLinkManager {
     private record TransientHolderState(ServerLevel level, long expiryTick, @Nullable Vec3 holderPos) {}
     /** Snapshot of currently synced mob holders per level for cheap stale-holder cleanup. */
     private static final Map<String, Set<UUID>> ACTIVE_MOB_HOLDERS_BY_LEVEL = new HashMap<>();
+
+    private static final String TRACKER_BE_CLASS = "com.finchy.pipeorgans.content.midi.trackerBar.TrackerBarBlockEntity";
+    private static Field trackerMidiSourceField;
+    private static Field midiSourceGhostInvField;
+    private static boolean trackerReflectionInitialized;
 
     private static final int MOB_SYNC_INTERVAL_TICKS = 10;
     /**
@@ -305,6 +314,9 @@ public final class PolyphonyLinkManager {
             debugRoute("drop:no-link", level, pos, status, data1, data2, null);
             return;
         }
+
+        // Keep optional per-channel item-filter constraints in sync with tracker ghost slots.
+        syncTrackerFrequencyFilters(level, pos, link);
 
         // Track the latest GM program per channel so the assignment algorithm
         // can prefer matching instrument families.
@@ -601,9 +613,14 @@ public final class PolyphonyLinkManager {
             if (link == null) {
                 link = new PolyphonyLink(key.levelPath(), key.pos());
                 primeLinkProgramsFromSnapshot(key, link);
+                if (levelHint != null && key.levelPath().equals(levelHint.dimension().location().toString())) {
+                    syncTrackerFrequencyFilters(levelHint, key.pos(), link);
+                }
                 LINKS.put(key, link);
             }
-            link.addOrRefreshPlayer(holderId, held.mainHandFamily(), held.offHandFamily());
+            link.addOrRefreshPlayer(holderId,
+                held.mainHandFamily(), held.offHandFamily(),
+                held.mainHandItem(), held.offHandItem());
         }
 
         if (desired.isEmpty()) {
@@ -727,14 +744,84 @@ public final class PolyphonyLinkManager {
         if (target == null) return;
         LinkKey key = new LinkKey(target.levelPath(), target.pos().immutable());
         HeldInstruments prior = out.get(key);
+        Item item = stack.getItem();
         if (prior == null) {
             out.put(key, mainHand
-                ? new HeldInstruments(family, null)
-                : new HeldInstruments(null, family));
+                ? new HeldInstruments(family, null, item, null)
+                : new HeldInstruments(null, family, null, item));
         } else {
             out.put(key, mainHand
-                ? prior.withMainHand(family)
-                : prior.withOffHand(family));
+                ? prior.withMainHand(family, item)
+                : prior.withOffHand(family, item));
+        }
+    }
+
+    private static void syncTrackerFrequencyFilters(ServerLevel level, BlockPos pos, PolyphonyLink link) {
+        link.setChannelInstrumentFilters(readTrackerChannelInstrumentFilters(level, pos));
+    }
+
+    @Nullable
+    private static Item[] readTrackerChannelInstrumentFilters(ServerLevel level, BlockPos pos) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || !TRACKER_BE_CLASS.equals(be.getClass().getName())) {
+            return null;
+        }
+
+        if (!ensureTrackerReflection(be.getClass())) {
+            return null;
+        }
+
+        Object midiSourceObj = getFieldValue(trackerMidiSourceField, be);
+        if (midiSourceObj == null) {
+            return null;
+        }
+
+        Object ghostInvObj = getFieldValue(midiSourceGhostInvField, midiSourceObj);
+        if (!(ghostInvObj instanceof ItemStackHandler ghostInv)) {
+            return null;
+        }
+
+        Item[] channelFilters = new Item[16];
+        boolean any = false;
+        for (int ch = 0; ch < 16; ch++) {
+            ItemStack filterStack = ghostInv.getStackInSlot(ch);
+            if (InstrumentItem.familyOf(filterStack) == null) {
+                channelFilters[ch] = null;
+                continue;
+            }
+            channelFilters[ch] = filterStack.getItem();
+            any = true;
+        }
+        return any ? channelFilters : null;
+    }
+
+    private static boolean ensureTrackerReflection(Class<?> trackerClass) {
+        if (trackerReflectionInitialized) {
+            return trackerMidiSourceField != null && midiSourceGhostInvField != null;
+        }
+        trackerReflectionInitialized = true;
+        try {
+            trackerMidiSourceField = trackerClass.getDeclaredField("midiSourceBehaviour");
+            trackerMidiSourceField.setAccessible(true);
+
+            Class<?> midiSourceClass = Class.forName("com.finchy.pipeorgans.content.midi.MidiSourceBehaviour");
+            midiSourceGhostInvField = midiSourceClass.getDeclaredField("storedGhostInv");
+            midiSourceGhostInvField.setAccessible(true);
+            return true;
+        } catch (Throwable t) {
+            trackerMidiSourceField = null;
+            midiSourceGhostInvField = null;
+            return false;
+        }
+    }
+
+    @Nullable
+    private static Object getFieldValue(@Nullable Field field, Object owner) {
+        if (field == null || owner == null) return null;
+        try {
+            return field.get(owner);
+        } catch (IllegalAccessException ignored) {
+            return null;
         }
     }
 
@@ -799,13 +886,15 @@ public final class PolyphonyLinkManager {
     }
 
     private record HeldInstruments(@Nullable InstrumentFamily mainHandFamily,
-                                   @Nullable InstrumentFamily offHandFamily) {
-        private HeldInstruments withMainHand(InstrumentFamily family) {
-            return new HeldInstruments(family, offHandFamily);
+                                   @Nullable InstrumentFamily offHandFamily,
+                                   @Nullable Item mainHandItem,
+                                   @Nullable Item offHandItem) {
+        private HeldInstruments withMainHand(InstrumentFamily family, Item item) {
+            return new HeldInstruments(family, offHandFamily, item, offHandItem);
         }
 
-        private HeldInstruments withOffHand(InstrumentFamily family) {
-            return new HeldInstruments(mainHandFamily, family);
+        private HeldInstruments withOffHand(InstrumentFamily family, Item item) {
+            return new HeldInstruments(mainHandFamily, family, mainHandItem, item);
         }
     }
 
