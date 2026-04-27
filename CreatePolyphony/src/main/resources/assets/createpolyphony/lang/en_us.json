@@ -63,7 +63,7 @@
   "createpolyphony.configuration.ringBufferBytes": "PCM Ring Buffer (Bytes)",
   "createpolyphony.configuration.ringBufferBytes.tooltip": "Size of the PCM bridge buffer between synth generation and Minecraft audio playback.",
   "createpolyphony.configuration.pumpChunkBytes": "Pump Chunk Size (Bytes)",
-  "createpolyphony.configuration.pumpChunkBytes.tooltip": "How many PCM bytes are pulled from Gervill per synth pump iteration.",
+  "createpolyphony.configuration.pumpChunkBytes.tooltip": "Target PCM bytes per synth render chunk. Lower values improve responsiveness; higher values reduce CPU wakeups.",
   "createpolyphony.configuration.adaptiveMinSubchunkBytes": "Adaptive Min Subchunk (Bytes)",
   "createpolyphony.configuration.adaptiveMinSubchunkBytes.tooltip": "Lower bound for adaptive stream subchunk size. Higher values are steadier but less responsive.",
   "createpolyphony.configuration.adaptiveMaxSubchunkBytes": "Adaptive Max Subchunk (Bytes)",
@@ -72,6 +72,8 @@
   "createpolyphony.configuration.adaptiveTargetRenderNs.tooltip": "Target render time budget per adaptive subchunk in nanoseconds.",
   "createpolyphony.configuration.adaptiveEwmaAlpha": "Adaptive EWMA Alpha",
   "createpolyphony.configuration.adaptiveEwmaAlpha.tooltip": "Controller smoothing factor (0..1): lower = steadier, higher = more reactive.",
+  "createpolyphony.configuration.synthSoundSource": "Synth Volume Slider",
+  "createpolyphony.configuration.synthSoundSource.tooltip": "Chooses which Minecraft sound category controls instrument playback volume. Defaults to RECORDS.",
   "createpolyphony.configuration.oneManBandUseAllGmPrograms": "One Man Band Uses All GM Programs",
   "createpolyphony.configuration.oneManBandUseAllGmPrograms.tooltip": "When enabled, One Man Band plays raw GM programs (including synth lead, organ, etc). When disabled, it is limited to your explicitly supported instrument families."
 }

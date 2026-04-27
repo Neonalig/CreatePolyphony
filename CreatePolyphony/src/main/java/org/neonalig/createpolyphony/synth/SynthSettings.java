@@ -25,8 +25,8 @@ import javax.sound.sampled.AudioFormat;
  * @param maxVoices          Soft cap on simultaneously-active voices; the
  *                           oldest voice is culled before exceeding it.
  * @param ringBufferBytes    Capacity of the PCM ring buffer between the
- *                           Gervill pump thread and the audio reader.
- * @param pumpChunkBytes     Bytes to read from Gervill per pump-loop
+ *                           synth render pipeline and the audio reader.
+ * @param pumpChunkBytes     Target bytes generated per synth render loop
  *                           iteration. Smaller = lower latency but more
  *                           thread wake-ups; larger = more efficient but
  *                           more startup latency on the first NoteOn.

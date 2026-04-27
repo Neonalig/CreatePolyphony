@@ -1,5 +1,6 @@
 package org.neonalig.createpolyphony;
 
+import net.minecraft.sounds.SoundSource;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 import org.neonalig.createpolyphony.synth.SynthSettings;
@@ -22,7 +23,7 @@ public class Config {
         .defineInRange("ringBufferBytes", 44_100, 8_192, 1_048_576);
 
     public static final ModConfigSpec.IntValue PUMP_CHUNK_BYTES = BUILDER
-        .comment("How many PCM bytes the synth pump thread requests from Gervill per read.")
+        .comment("How many PCM bytes each synth render chunk targets during manual SoundFont synthesis.")
         .defineInRange("pumpChunkBytes", 4_096, 512, 65_536);
 
     public static final ModConfigSpec.IntValue ADAPTIVE_MIN_SUBCHUNK_BYTES = BUILDER
@@ -45,6 +46,10 @@ public class Config {
         .comment("If true, One Man Band uses raw MIDI programs for full GM playback.",
             "If false, One Man Band snaps to supported instrument families only.")
         .define("oneManBandUseAllGmPrograms", false);
+
+    public static final ModConfigSpec.EnumValue<SoundSource> SYNTH_SOUND_SOURCE = BUILDER
+        .comment("Which Minecraft volume slider controls instrument synth playback.")
+        .defineEnum("synthSoundSource", SoundSource.RECORDS);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
@@ -100,6 +105,10 @@ public class Config {
 
     public static boolean oneManBandUsesAllGmPrograms() {
         return ONE_MAN_BAND_USE_ALL_GM_PROGRAMS.get();
+    }
+
+    public static SoundSource synthSoundSource() {
+        return SYNTH_SOUND_SOURCE.get();
     }
 
     public static SynthSettings synthSettings() {

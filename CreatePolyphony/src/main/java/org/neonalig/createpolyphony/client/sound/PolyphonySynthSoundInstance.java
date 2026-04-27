@@ -10,11 +10,11 @@ import net.minecraft.client.sounds.SoundBufferLibrary;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.valueproviders.ConstantFloat;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
@@ -71,7 +71,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
     private boolean stopped = false;
 
     public PolyphonySynthSoundInstance(PolyphonySynthesizer synth) {
-        super(SYNTH_LOCATION, SoundSource.BLOCKS, RandomSource.create());
+        super(SYNTH_LOCATION, Config.synthSoundSource(), RandomSource.create());
         this.synth = synth;
         // Build a Sound with stream=true so SoundEngine routes through our getStream() override
         // rather than the static-buffer path. The path/location values don't matter because

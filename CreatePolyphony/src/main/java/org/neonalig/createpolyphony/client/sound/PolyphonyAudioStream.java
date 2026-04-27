@@ -21,7 +21,7 @@ import java.nio.ByteOrder;
  * overriding {@link net.minecraft.client.resources.sounds.SoundInstance#getStream}
  * on our {@link PolyphonySynthSoundInstance} so MC asks <em>us</em> for the
  * stream rather than the buffer library. The data this stream serves is
- * already PCM (produced live by Gervill); no decode step needed.</p>
+ * already PCM (produced live by our SoundFont synth); no decode step needed.</p>
  *
  * <h2>read() contract</h2>
  * <p>OpenAL's stream pump calls {@code read(size)} on a background thread
