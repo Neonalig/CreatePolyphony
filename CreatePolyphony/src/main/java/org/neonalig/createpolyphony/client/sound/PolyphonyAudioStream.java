@@ -3,6 +3,7 @@ package org.neonalig.createpolyphony.client.sound;
 import net.minecraft.client.sounds.AudioStream;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import javax.sound.sampled.AudioFormat;
@@ -49,7 +50,9 @@ import java.nio.ByteOrder;
 @OnlyIn(Dist.CLIENT)
 public final class PolyphonyAudioStream implements AudioStream {
 
-    private static final int TARGET_RENDER_CHUNK_BYTES = 4_096;
+    // Fallbacks used if config bounds are temporarily invalid.
+    private static final int DEFAULT_MIN_SUBCHUNK_BYTES = 2_048;
+    private static final int DEFAULT_MAX_SUBCHUNK_BYTES = 8_192;
 
     private final PolyphonySynthesizer synth;
     private final AudioFormat format;
@@ -57,6 +60,8 @@ public final class PolyphonyAudioStream implements AudioStream {
     private final byte[] scratch;
 
     private volatile boolean closed = false;
+    private int adaptiveSubchunkBytes;
+    private double renderNsPerByteEwma = -1.0D;
 
     /**
      * @param synth the live synthesizer whose ring buffer we drain. We do
@@ -69,6 +74,7 @@ public final class PolyphonyAudioStream implements AudioStream {
         this.synth = synth;
         this.format = synth.settings().toAudioFormat();
         this.scratch = new byte[Math.max(16_384, synth.settings().pumpChunkBytes() * 4)];
+        this.adaptiveSubchunkBytes = 4_096;
     }
 
     @Override
@@ -79,20 +85,72 @@ public final class PolyphonyAudioStream implements AudioStream {
     @Override
     public ByteBuffer read(int size) throws IOException {
         int frame = synth.settings().frameSize();
-        // Keep chunks modest to reduce event batching latency on tracker playback.
-        int boundedSize = Math.min(size, TARGET_RENDER_CHUNK_BYTES);
-        int request = Math.max(frame, Math.min(boundedSize, scratch.length));
+        // Honor OpenAL's request size so the streaming queue stays full.
+        int boundedSize = Math.min(size, scratch.length);
+        int request = Math.max(frame, boundedSize);
         request -= request % frame;
         if (request <= 0) {
             request = frame;
         }
 
         if (!closed) {
-            int read = synth.renderPcm(scratch, request);
-            // On underrun, pad with silence so OpenAL always sees valid PCM.
-            if (read < request) {
-                java.util.Arrays.fill(scratch, Math.max(0, read), request, (byte) 0);
+            int offset = 0;
+            int minSubchunkBytes = Math.max(frame, Config.adaptiveMinSubchunkBytes());
+            int maxSubchunkBytes = Math.max(minSubchunkBytes, Config.adaptiveMaxSubchunkBytes());
+            int targetRenderNs = Math.max(250_000, Config.adaptiveTargetRenderNs());
+            double ewmaAlpha = Math.max(0.01D, Math.min(1.0D, Config.adaptiveEwmaAlpha()));
+            int subchunkBytes = frameAlign(
+                Math.max(minSubchunkBytes, Math.min(adaptiveSubchunkBytes, Math.min(maxSubchunkBytes, request))),
+                frame);
+            if (subchunkBytes <= 0) {
+                subchunkBytes = frame;
             }
+
+            while (offset < request) {
+                int remaining = request - offset;
+                int chunk = Math.min(subchunkBytes, remaining);
+                chunk = frameAlign(chunk, frame);
+                if (chunk <= 0) {
+                    chunk = frame;
+                }
+
+                long t0 = System.nanoTime();
+                int read = synth.renderPcm(scratch, offset, chunk);
+                long elapsedNs = System.nanoTime() - t0;
+
+                // On underrun, pad this chunk with silence so OpenAL always sees valid PCM.
+                if (read < chunk) {
+                    java.util.Arrays.fill(scratch, offset + Math.max(0, read), offset + chunk, (byte) 0);
+                }
+
+                int bytesForCost = Math.max(frame, chunk);
+                double sampleNsPerByte = (double) elapsedNs / (double) bytesForCost;
+                if (renderNsPerByteEwma < 0D) {
+                    renderNsPerByteEwma = sampleNsPerByte;
+                } else {
+                    renderNsPerByteEwma += (sampleNsPerByte - renderNsPerByteEwma) * ewmaAlpha;
+                }
+
+                offset += chunk;
+            }
+
+            double nsPerByte = Math.max(1.0D, renderNsPerByteEwma);
+            int targetSubchunk = (int) Math.round(targetRenderNs / nsPerByte);
+            targetSubchunk = frameAlign(Math.max(minSubchunkBytes, Math.min(maxSubchunkBytes, targetSubchunk)), frame);
+            if (targetSubchunk <= 0) {
+                targetSubchunk = frame;
+            }
+
+            // Slew-limit chunk-size updates to avoid audible timing modulation.
+            int blended = subchunkBytes + ((targetSubchunk - subchunkBytes) / 4);
+            int clamped = Math.max(minSubchunkBytes, Math.min(maxSubchunkBytes, frameAlign(blended, frame)));
+            if (clamped <= 0) {
+                clamped = frameAlign(DEFAULT_MIN_SUBCHUNK_BYTES, frame);
+            }
+            if (clamped <= 0) {
+                clamped = frameAlign(DEFAULT_MAX_SUBCHUNK_BYTES, frame);
+            }
+            adaptiveSubchunkBytes = Math.max(frame, clamped);
         } else {
             java.util.Arrays.fill(scratch, 0, request, (byte) 0);
         }
@@ -102,6 +160,10 @@ public final class PolyphonyAudioStream implements AudioStream {
         out.put(scratch, 0, request);
         out.flip();
         return out;
+    }
+
+    private static int frameAlign(int bytes, int frame) {
+        return bytes - (bytes % Math.max(1, frame));
     }
 
     @Override

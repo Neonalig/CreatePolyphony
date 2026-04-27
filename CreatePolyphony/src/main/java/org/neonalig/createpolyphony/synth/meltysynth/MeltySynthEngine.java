@@ -20,6 +20,9 @@ public final class MeltySynthEngine {
     private static final int EVT_BEND = 4;
     private static final int EVT_CC = 5;
     private static final int EVT_ALL_NOTES_OFF = 6;
+    // Keep render/control quanta small so very short notes don't collapse into one large block.
+    private static final int TARGET_SYNTH_BLOCK_FRAMES = 64;
+    private static final int RENDER_SLICE_FRAMES = 64;
 
     private final SynthSettings settings;
 
@@ -41,7 +44,9 @@ public final class MeltySynthEngine {
 
     public void loadSoundFont(MeltySoundFont soundFont) {
         SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
-        synthSettings.blockSize(Math.max(8, Math.min(1024, settings.pumpChunkBytes() / Math.max(1, settings.frameSize()))));
+        int configuredFrames = settings.pumpChunkBytes() / Math.max(1, settings.frameSize());
+        int blockFrames = Math.max(16, Math.min(256, Math.min(TARGET_SYNTH_BLOCK_FRAMES, Math.max(16, configuredFrames))));
+        synthSettings.blockSize(blockFrames);
         synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
         synthSettings.enableReverbAndChorus(true);
         Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
@@ -134,42 +139,50 @@ public final class MeltySynthEngine {
 
         int frames = frameBytes / frameSize;
         Synthesizer current = synthesizer;
-        drainMidi(current);
-
-        float[] left = null;
-        float[] right = null;
-        if (soundFontLoaded && current != null && current.activeVoiceCount() > 0) {
-            left = new float[frames];
-            right = new float[frames];
-            current.render(left, right, 0, frames);
-        }
-        if (left == null) {
-            Arrays.fill(out, offset, offset + frameBytes, (byte) 0);
-            return frameBytes;
-        }
-
         int write = offset;
         int channelsOut = Math.max(1, settings.channels());
-        for (int i = 0; i < frames; i++) {
-            short l = toPcm16(left[i]);
-            if (channelsOut == 1) {
-                out[write++] = (byte) (l & 0xFF);
-                out[write++] = (byte) ((l >>> 8) & 0xFF);
-            } else {
-                short r = toPcm16(right[i]);
-                for (int ch = 0; ch < channelsOut; ch++) {
-                    short s = (ch & 1) == 0 ? l : r;
-                    out[write++] = (byte) (s & 0xFF);
-                    out[write++] = (byte) ((s >>> 8) & 0xFF);
+        int remainingFrames = frames;
+        int maxSlice = Math.max(1, Math.min(RENDER_SLICE_FRAMES, frames));
+        float[] left = new float[maxSlice];
+        float[] right = new float[maxSlice];
+
+        while (remainingFrames > 0) {
+            int sliceFrames = Math.min(remainingFrames, maxSlice);
+            boolean hadMidi = drainMidi(current);
+            boolean canRender = soundFontLoaded && current != null && (hadMidi || current.activeVoiceCount() > 0);
+
+            if (canRender) {
+                current.render(left, right, 0, sliceFrames);
+                for (int i = 0; i < sliceFrames; i++) {
+                    short l = toPcm16(left[i]);
+                    if (channelsOut == 1) {
+                        out[write++] = (byte) (l & 0xFF);
+                        out[write++] = (byte) ((l >>> 8) & 0xFF);
+                    } else {
+                        short r = toPcm16(right[i]);
+                        for (int ch = 0; ch < channelsOut; ch++) {
+                            short s = (ch & 1) == 0 ? l : r;
+                            out[write++] = (byte) (s & 0xFF);
+                            out[write++] = (byte) ((s >>> 8) & 0xFF);
+                        }
+                    }
                 }
+            } else {
+                int silenceBytes = sliceFrames * frameSize;
+                Arrays.fill(out, write, write + silenceBytes, (byte) 0);
+                write += silenceBytes;
             }
+
+            remainingFrames -= sliceFrames;
         }
 
         return frameBytes;
     }
 
-    private void drainMidi(@Nullable Synthesizer synth) {
+    private boolean drainMidi(@Nullable Synthesizer synth) {
+        boolean drained = false;
         while (midiQueue.poll(midiEventScratch)) {
+            drained = true;
             int type = midiEventScratch[0];
             int channel = midiEventScratch[1];
             int data1 = midiEventScratch[2];
@@ -194,6 +207,7 @@ public final class MeltySynthEngine {
                 }
             }
         }
+        return drained;
     }
 
 

@@ -118,10 +118,14 @@ public final class PolyphonySynthesizer {
     }
 
     public int renderPcm(byte[] out, int requestedBytes) {
+        return renderPcm(out, 0, requestedBytes);
+    }
+
+    public int renderPcm(byte[] out, int offset, int requestedBytes) {
         if (closed) {
             return 0;
         }
-        return engine.renderS16Interleaved(out, 0, requestedBytes);
+        return engine.renderS16Interleaved(out, offset, requestedBytes);
     }
 
     public void close() {
