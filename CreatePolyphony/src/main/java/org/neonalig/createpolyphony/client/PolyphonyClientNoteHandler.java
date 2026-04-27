@@ -156,6 +156,11 @@ public final class PolyphonyClientNoteHandler {
         }
     }
 
+    /** Emergency hard-stop for all local synth output. */
+    public static void panic() {
+        stopAll();
+    }
+
     // ---- Synth lookup ------------------------------------------------------------------------
 
     /**

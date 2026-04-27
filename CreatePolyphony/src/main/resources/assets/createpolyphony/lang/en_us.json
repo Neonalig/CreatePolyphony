@@ -37,6 +37,7 @@
   "screen.createpolyphony.soundfont.set_active": "Set Active",
   "screen.createpolyphony.soundfont.open_folder": "Open Folder",
   "screen.createpolyphony.soundfont.refresh": "Refresh",
+  "screen.createpolyphony.soundfont.panic": "Panic",
   "screen.createpolyphony.soundfont.folder": "Folder: %s",
 
   "createpolyphony.configuration.title": "Create: Polyphony Configuration",

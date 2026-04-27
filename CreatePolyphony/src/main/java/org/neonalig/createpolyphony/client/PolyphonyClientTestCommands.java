@@ -41,7 +41,9 @@ public final class PolyphonyClientTestCommands {
                     .then(argument("value", IntegerArgumentType.integer(512, 65_536))
                         .executes(ctx -> updateConfig("pumpChunkBytes", IntegerArgumentType.getInteger(ctx, "value"))))))
             .then(literal("reloadSynth")
-                .executes(ctx -> reloadSynth())));
+                .executes(ctx -> reloadSynth()))
+            .then(literal("panic")
+                .executes(ctx -> panic())));
     }
 
     private static int openGui() {
@@ -91,6 +93,12 @@ public final class PolyphonyClientTestCommands {
         } else {
             tell("Synth reloaded from current config values.");
         }
+        return 1;
+    }
+
+    private static int panic() {
+        PolyphonyClientNoteHandler.panic();
+        tell("Panic triggered: stopped all active notes.");
         return 1;
     }
 
