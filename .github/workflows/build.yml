@@ -24,14 +24,16 @@ jobs:
       uses: gradle/actions/setup-gradle@v3
 
     - name: Make gradlew executable
+      working-directory: ./CreatePolyphony
       run: chmod +x ./gradlew
 
     - name: Build with Gradle
+      working-directory: ./CreatePolyphony
       run: ./gradlew build
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: create-polyphony-build
-        path: build/libs/
+        path: CreatePolyphony/build/libs/
         if-no-files-found: error
