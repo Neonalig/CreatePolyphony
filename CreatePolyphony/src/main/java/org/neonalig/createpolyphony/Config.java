@@ -79,7 +79,7 @@ public class Config {
             "Acts as a pre-attenuation PCM gain - values above 1.0 amplify, with hard-clip protection.",
             "Useful for boosting external instrument loudness without changing the global Records slider.",
             "Client-applicable.")
-        .defineInRange("otherPlayVolume", 1.75D, 0.0D, 4.0D);
+        .defineInRange("otherPlayVolume", 0.5D, 0.0D, 4.0D);
 
     public static final ModConfigSpec.DoubleValue FALLOFF_MULTIPLIER = BUILDER
         .comment("Multiplies the distance at which positional instrument audio fades out.",
