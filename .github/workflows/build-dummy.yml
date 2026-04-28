@@ -1,0 +1,15 @@
+name: CI Build (Dummy)
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'CreatePolyphony/**'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Bypass CI
+      run: echo "No code changes detected. Bypassing build."

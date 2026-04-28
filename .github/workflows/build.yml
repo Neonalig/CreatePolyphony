@@ -3,6 +3,9 @@ name: CI Build
 on:
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'CreatePolyphony/**'
+      - '.github/workflows/build.yml'
 
 jobs:
   build:
