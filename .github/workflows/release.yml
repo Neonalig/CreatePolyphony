@@ -1,0 +1,55 @@
+name: Release Mod
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required for creating GitHub Releases
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+
+    - name: Make gradlew executable
+      working-directory: ./CreatePolyphony
+      run: chmod +x ./gradlew
+
+    - name: Build Mod
+      working-directory: ./CreatePolyphony
+      run: ./gradlew build
+
+    - name: Publish Release
+      uses: Kir-Antipov/mc-publish@v3.3
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        
+        # Uncomment and configure these when ready to push to Modrinth/CurseForge
+        # modrinth-id: YOUR_MODRINTH_PROJECT_ID
+        # modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+        # curseforge-id: YOUR_CURSEFORGE_PROJECT_ID
+        # curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+        
+        # Grabs the compiled jar, ignoring dev/sources jars
+        files: CreatePolyphony/build/libs/!(*-dev|-sources).jar
+        
+        name: Create: Polyphony ${{ github.ref_name }}
+        version: ${{ github.ref_name }}
+        version-type: release
+        changelog-file: CHANGELOG.md # Ensure this file exists in your repo root
+        
+        loaders: neoforge
+        game-versions: 1.21.1

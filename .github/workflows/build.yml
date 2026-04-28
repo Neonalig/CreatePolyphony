@@ -3,8 +3,14 @@ name: Build Mod
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'CreatePolyphony/**'
+      - '.github/workflows/build.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'CreatePolyphony/**'
+      - '.github/workflows/build.yml'
 
 jobs:
   build:
