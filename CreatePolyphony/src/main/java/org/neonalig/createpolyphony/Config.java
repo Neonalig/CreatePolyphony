@@ -62,6 +62,32 @@ public class Config {
             "INTERACTION_ONLY: only keeps holders active briefly around deployer interaction ticks (hand fully deploys).")
         .defineEnum("deployerPlaybackMode", DeployerPlaybackMode.INTERACTION_ONLY);
 
+    public static final ModConfigSpec.IntValue AUDIBLE_DISTANCE_BLOCKS = BUILDER
+        .comment("Maximum distance, in blocks, at which an instrument note can be heard.",
+            "This is decoupled from server simulation distance so playback range is not implicitly tied to chunk loading.",
+            "Server-applicable: gates which players receive note packets and is forwarded to clients for falloff bookkeeping.")
+        .defineInRange("audibleDistanceBlocks", 64, 16, 1024);
+
+    public static final ModConfigSpec.DoubleValue SELF_PLAY_VOLUME = BUILDER
+        .comment("Volume multiplier applied to instruments you are personally holding (self-play).",
+            "Acts as a pre-attenuation PCM gain - values above 1.0 amplify, with hard-clip protection.",
+            "Client-applicable.")
+        .defineInRange("selfPlayVolume", 1.0D, 0.0D, 4.0D);
+
+    public static final ModConfigSpec.DoubleValue OTHER_PLAY_VOLUME = BUILDER
+        .comment("Volume multiplier applied to instruments held by other players, mobs, and deployers (positional).",
+            "Acts as a pre-attenuation PCM gain - values above 1.0 amplify, with hard-clip protection.",
+            "Useful for boosting external instrument loudness without changing the global Records slider.",
+            "Client-applicable.")
+        .defineInRange("otherPlayVolume", 1.75D, 0.0D, 4.0D);
+
+    public static final ModConfigSpec.DoubleValue FALLOFF_MULTIPLIER = BUILDER
+        .comment("Multiplies the distance at which positional instrument audio fades out.",
+            "1.0 = audio reaches its maximum hearable distance; 0.5 = falls off twice as fast; 2.0 = carries twice as far within the same audible distance.",
+            "Higher values keep instruments loud closer to the source; lower values make them dim more aggressively with distance.",
+            "Client-applicable.")
+        .defineInRange("falloffMultiplier", 1.0D, 0.1D, 4.0D);
+
     static final ModConfigSpec SPEC = BUILDER.build();
 
     public static void applyAudioTimingPreset(AudioTimingPreset preset) {
@@ -125,6 +151,22 @@ public class Config {
 
     public static DeployerPlaybackMode deployerPlaybackMode() {
         return DEPLOYER_PLAYBACK_MODE.get();
+    }
+
+    public static int audibleDistanceBlocks() {
+        return AUDIBLE_DISTANCE_BLOCKS.get();
+    }
+
+    public static double selfPlayVolume() {
+        return SELF_PLAY_VOLUME.get();
+    }
+
+    public static double otherPlayVolume() {
+        return OTHER_PLAY_VOLUME.get();
+    }
+
+    public static double falloffMultiplier() {
+        return FALLOFF_MULTIPLIER.get();
     }
 
     public static SynthSettings synthSettings() {

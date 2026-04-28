@@ -503,9 +503,20 @@ public final class PolyphonyLinkManager {
         return sent;
     }
 
+    /**
+     * Maximum audible-distance, in blocks, used both for routing-eligibility
+     * gating and as the falloff scale forwarded to clients in the
+     * {@link PlayInstrumentNotePayload}.
+     *
+     * <p>Decoupled from server simulation distance so playback range is not
+     * implicitly tied to chunk loading - a small simulation distance no longer
+     * means instruments have a tiny audible carry, and a large simulation
+     * distance no longer means notes are routed across the whole world.</p>
+     */
     private static int simulationDistanceBlocks(@Nullable MinecraftServer server) {
-        if (server == null) return 16 * 10;
-        return Math.max(1, server.getPlayerList().getSimulationDistance()) * 16;
+        // Server-applicable config: read on the server side. Clients receive the
+        // resulting block count in the packet and apply their own falloff curve.
+        return Math.max(16, Config.audibleDistanceBlocks());
     }
 
     private static void warnMissingHolderPosition(ServerLevel level, BlockPos trackerPos, UUID holderId, int channel, int note) {

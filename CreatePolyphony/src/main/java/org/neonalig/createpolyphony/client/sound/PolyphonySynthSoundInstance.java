@@ -83,8 +83,15 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         super(SYNTH_LOCATION, Config.synthSoundSource(), RandomSource.create());
         this.synth = synth;
         this.maxDistanceBlocks = Math.max(16, maxDistanceBlocks);
-        // attenuationDistance is expressed in 16-block sound units.
-        int attenuationField = Math.max(1, this.maxDistanceBlocks / 16);
+        // MC's SoundEngine passes Sound#getAttenuationDistance() *directly* to
+        // Channel.linearAttenuation, which sets it as OpenAL's AL_MAX_DISTANCE
+        // in world-block units (positions are alSource3f'd in raw block coords).
+        // Multiply by the falloff multiplier so larger values keep instruments
+        // loud closer to the source (gentler falloff curve) without changing
+        // the routing/audible-distance budget enforced by the server.
+        double falloffMult = Math.max(0.1D, Config.falloffMultiplier());
+        int attenuationField = (int) Math.max(1, Math.min(Short.MAX_VALUE,
+            Math.round(this.maxDistanceBlocks * falloffMult)));
         this.syntheticSound = new Sound(
             SYNTH_LOCATION,
             ConstantFloat.of(1.0F),
@@ -93,7 +100,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
             Sound.Type.FILE,
             true,                 // stream
             false,                // preload
-            attenuationField      // attenuation distance (in SoundManager units)
+            attenuationField      // attenuation distance (blocks; OpenAL AL_MAX_DISTANCE)
         );
         this.sound = syntheticSound;
         this.syntheticEvents = new WeighedSoundEvents(SYNTH_LOCATION, null);
@@ -129,7 +136,13 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
      */
     @Override
     public CompletableFuture<AudioStream> getStream(SoundBufferLibrary soundBuffers, Sound sound, boolean looping) {
-        return CompletableFuture.completedFuture(new PolyphonyAudioStream(synth));
+        // Apply the configured PCM gain (self vs non-self) live, so toggling
+        // the held instrument or editing config takes effect on the next read.
+        return CompletableFuture.completedFuture(new PolyphonyAudioStream(synth, this::currentPcmGain));
+    }
+
+    private double currentPcmGain() {
+        return selfPlay ? Config.selfPlayVolume() : Config.otherPlayVolume();
     }
 
     @Override
