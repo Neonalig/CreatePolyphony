@@ -417,19 +417,23 @@ public final class PolyphonyLinkManager {
      * Sends a MIDI note packet to the appropriate recipients with dimension and
      * distance checks.
      *
-     * <p><b>NoteOn</b> events are gated by:
-     * <ol>
-     *   <li>Same dimension as the tracker level (dimension guards prevent
-     *       cross-dimension audio bleeding).</li>
-     *   <li>Position within the server simulation distance radius of the
-     *       tracker block position.</li>
-     * </ol>
+     * <p>The audible-distance budget is interpreted as listener-to-source distance.
+     * <b>NoteOn</b> events are gated as follows:
+     * <ul>
+     *   <li>For a <em>player</em> holder: the holder always receives their own
+     *       selfPlay packet (they are co-located with the source). Cross-dimension
+     *       holders are skipped entirely. Watcher broadcasts are gated by each
+     *       watcher's distance to the holder's world position.</li>
+     *   <li>For a <em>non-player</em> holder (mob / deployer): each watcher is
+     *       gated by their distance to the holder's world position.</li>
+     * </ul>
      * <b>NoteOff / stop events</b> always go through without range checks so
      * in-flight notes are never left stuck.</p>
      *
      * @param trackerLevel the level the tracker block lives in.
-     * @param trackerPos   the tracker block position (used for distance checks).
-     * @param holderPos    world position of the holder (mob / deployer).
+     * @param trackerPos   the tracker block position (kept for diagnostic context).
+     * @param holderPos    world position of the holder (mob / deployer); ignored when
+     *                     the holder resolves to a live ServerPlayer.
      * @param holderId     UUID of the channel assignee (player UUID or non-player pseudo-UUID).
      */
     private static boolean sendNotePacket(ServerLevel trackerLevel, BlockPos trackerPos,
@@ -443,15 +447,15 @@ public final class PolyphonyLinkManager {
         // ---- Direct player recipient ----
         ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(holderId);
         if (directPlayer != null) {
-            if (isNoteOn) {
-                // Dimension check: only route NoteOn to players in the tracker's dimension.
-                if (directPlayer.level() != trackerLevel) return false;
-                // Distance check: stop delivering notes once the player wanders out of range.
-                double distSq = directPlayer.distanceToSqr(trackerPos.getX() + 0.5,
-                    trackerPos.getY() + 0.5, trackerPos.getZ() + 0.5);
-                if (distSq > maxDistSq) return false;
-            }
-            // selfPlay=true: the receiving player IS the instrument holder.
+            // Dimension gate: a holder in another dimension is not participating in this
+            // tracker's audio at all (their world-space position is meaningless to listeners
+            // here). NoteOffs still pass through so any in-flight notes don't stick.
+            if (isNoteOn && directPlayer.level() != trackerLevel) return false;
+
+            // selfPlay=true: the receiving player IS the instrument holder. The audible-distance
+            // budget is about listener-to-source distance, and the listener IS the source here,
+            // so distance is always zero - holders always hear themselves regardless of how far
+            // they have wandered from the tracker that's driving the MIDI feed.
             Vec3 pp = directPlayer.position();
             PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
@@ -459,6 +463,8 @@ public final class PolyphonyLinkManager {
                 holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
 
             // Also broadcast to nearby observers so they can hear the player positionally.
+            // Mirrors the non-player holder branch: gate by each watcher's distance to the
+            // holder's position, not by holder-to-tracker distance.
             for (ServerPlayer watcher : trackerLevel.players()) {
                 if (watcher == directPlayer) continue; // already sent selfPlay above
                 if (isNoteOn) {
