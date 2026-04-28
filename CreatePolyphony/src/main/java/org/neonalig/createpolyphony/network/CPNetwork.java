@@ -1,11 +1,12 @@
 package org.neonalig.createpolyphony.network;
 
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import org.neonalig.createpolyphony.CreatePolyphony;
-import org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler;
 
 /**
  * Registers our custom packet payloads with NeoForge's network registrar.
@@ -29,10 +30,24 @@ public final class CPNetwork {
         PayloadRegistrar registrar = event.registrar(CreatePolyphony.MODID).versioned(VERSION);
 
         // Server -> Client: play a note on the player's held instrument.
-        registrar.playToClient(
-            PlayInstrumentNotePayload.TYPE,
-            PlayInstrumentNotePayload.STREAM_CODEC,
-            PolyphonyClientNoteHandler::handle
-        );
+        // The handler is registered only on the physical client, since it
+        // transitively references client-only classes (SoundInstance, etc.).
+        // The type itself is still declared for both sides via playToClient
+        // on the client; the dedicated server only needs to know about
+        // outgoing types it sends, which it does through the codec usage in
+        // CreatePolyphony's send paths (PacketDistributor).
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            org.neonalig.createpolyphony.client.CPClientPayloadRegistrar.register(registrar);
+        } else {
+            // On the dedicated server, register a no-op handler so the type
+            // is known to the network protocol. The handler will never be
+            // invoked server-side because playToClient packets are only
+            // received on the client.
+            registrar.playToClient(
+                PlayInstrumentNotePayload.TYPE,
+                PlayInstrumentNotePayload.STREAM_CODEC,
+                (payload, context) -> {}
+            );
+        }
     }
 }
