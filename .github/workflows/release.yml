@@ -46,7 +46,7 @@ jobs:
         # Grabs the compiled jar, ignoring dev/sources jars
         files: CreatePolyphony/build/libs/!(*-dev|-sources).jar
         
-        name: Create: Polyphony ${{ github.ref_name }}
+        name: "Create: Polyphony ${{ github.ref_name }}"
         version: ${{ github.ref_name }}
         version-type: release
         changelog-file: CHANGELOG.md # Ensure this file exists in your repo root
