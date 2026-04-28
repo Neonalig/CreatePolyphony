@@ -66,7 +66,7 @@ public class Config {
         .comment("Maximum distance, in blocks, at which an instrument note can be heard.",
             "This is decoupled from server simulation distance so playback range is not implicitly tied to chunk loading.",
             "Server-applicable: gates which players receive note packets and is forwarded to clients for falloff bookkeeping.")
-        .defineInRange("audibleDistanceBlocks", 64, 16, 1024);
+        .defineInRange("audibleDistanceBlocks", 48, 16, 1024);
 
     public static final ModConfigSpec.DoubleValue SELF_PLAY_VOLUME = BUILDER
         .comment("Volume multiplier applied to instruments you are personally holding (self-play).",
@@ -79,14 +79,14 @@ public class Config {
             "Acts as a pre-attenuation PCM gain - values above 1.0 amplify, with hard-clip protection.",
             "Useful for boosting external instrument loudness without changing the global Records slider.",
             "Client-applicable.")
-        .defineInRange("otherPlayVolume", 0.5D, 0.0D, 4.0D);
+        .defineInRange("otherPlayVolume", 1.0D, 0.0D, 4.0D);
 
     public static final ModConfigSpec.DoubleValue FALLOFF_MULTIPLIER = BUILDER
         .comment("Multiplies the distance at which positional instrument audio fades out.",
             "1.0 = audio reaches its maximum hearable distance; 0.5 = falls off twice as fast; 2.0 = carries twice as far within the same audible distance.",
             "Higher values keep instruments loud closer to the source; lower values make them dim more aggressively with distance.",
             "Client-applicable.")
-        .defineInRange("falloffMultiplier", 1.0D, 0.1D, 4.0D);
+        .defineInRange("falloffMultiplier", 0.5D, 0.1D, 4.0D);
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
