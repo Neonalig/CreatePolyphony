@@ -10,6 +10,7 @@ import javax.sound.sampled.AudioFormat;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.function.DoubleSupplier;
 
 /**
  * Bridges PCM produced by {@link PolyphonySynthesizer} into Minecraft's {@link AudioStream} interface.
@@ -58,23 +59,43 @@ public final class PolyphonyAudioStream implements AudioStream {
     private final AudioFormat format;
     /** Reusable scratch buffer to avoid per-read allocation. */
     private final byte[] scratch;
+    /**
+     * Per-read gain factor applied to PCM samples before they reach OpenAL.
+     * Allows >1.0 amplification (with hard-clip protection) to compensate for
+     * MC's downstream {@code clamp(volume * sourceSlider, 0, 1)}, which would
+     * otherwise prevent the sound instance from ever exceeding unity gain
+     * even when distance attenuation reduces perceived loudness.
+     */
+    private final DoubleSupplier gainSupplier;
+    /** {@code true} only when format is 16-bit signed PCM (the gain stage assumes that layout). */
+    private final boolean gainApplicable;
 
     private volatile boolean closed = false;
     private int adaptiveSubchunkBytes;
     private double renderNsPerByteEwma = -1.0D;
 
     /**
-     * @param synth the live synthesizer whose ring buffer we drain. We do
-     *              <b>not</b> own its lifecycle - closing this stream does
-     *              not close the synth (the synth outlives any number of
-     *              {@link AudioStream} instances and may be re-bridged on
-     *              soundfont swaps).
+     * @param synth         the live synthesizer whose ring buffer we drain. We do
+     *                      <b>not</b> own its lifecycle - closing this stream does
+     *                      not close the synth (the synth outlives any number of
+     *                      {@link AudioStream} instances and may be re-bridged on
+     *                      soundfont swaps).
+     * @param gainSupplier  per-read gain factor (1.0 = unchanged). Queried each
+     *                      render so live config or self/non-self changes take
+     *                      effect immediately without rebuilding the stream.
      */
-    public PolyphonyAudioStream(PolyphonySynthesizer synth) {
+    public PolyphonyAudioStream(PolyphonySynthesizer synth, DoubleSupplier gainSupplier) {
         this.synth = synth;
         this.format = synth.settings().toAudioFormat();
         this.scratch = new byte[Math.max(16_384, synth.settings().pumpChunkBytes() * 4)];
         this.adaptiveSubchunkBytes = 4_096;
+        this.gainSupplier = gainSupplier != null ? gainSupplier : () -> 1.0D;
+        this.gainApplicable = format.getSampleSizeInBits() == 16 && !format.isBigEndian();
+    }
+
+    /** Backward-compatible constructor: unity gain (no amplification). */
+    public PolyphonyAudioStream(PolyphonySynthesizer synth) {
+        this(synth, () -> 1.0D);
     }
 
     @Override
@@ -134,6 +155,16 @@ public final class PolyphonyAudioStream implements AudioStream {
                 offset += chunk;
             }
 
+            // Apply post-render gain so the result can exceed MC's downstream
+            // [0..1] volume clamp without losing dynamic range. Done once per
+            // read() rather than per-subchunk for cache locality.
+            if (gainApplicable) {
+                double gain = gainSupplier.getAsDouble();
+                if (Double.isFinite(gain) && Math.abs(gain - 1.0D) > 1.0e-3D && gain >= 0.0D) {
+                    applyGain16LE(scratch, 0, request, gain);
+                }
+            }
+
             double nsPerByte = Math.max(1.0D, renderNsPerByteEwma);
             int targetSubchunk = (int) Math.round(targetRenderNs / nsPerByte);
             targetSubchunk = frameAlign(Math.max(minSubchunkBytes, Math.min(maxSubchunkBytes, targetSubchunk)), frame);
@@ -164,6 +195,26 @@ public final class PolyphonyAudioStream implements AudioStream {
 
     private static int frameAlign(int bytes, int frame) {
         return bytes - (bytes % Math.max(1, frame));
+    }
+
+    /**
+     * Multiplies signed 16-bit little-endian PCM samples by {@code gain} in
+     * place, hard-clipping to the int16 range so amplification beyond unity
+     * does not wrap negative.
+     */
+    private static void applyGain16LE(byte[] buf, int off, int len, double gain) {
+        int end = off + (len & ~1); // 2-byte aligned
+        for (int i = off; i < end; i += 2) {
+            int lo = buf[i] & 0xFF;
+            int hi = buf[i + 1]; // signed sign-extends
+            int sample = (hi << 8) | lo;
+            double scaled = sample * gain;
+            int clipped = scaled >= 32767.0D ? 32767
+                : scaled <= -32768.0D ? -32768
+                : (int) scaled;
+            buf[i] = (byte) (clipped & 0xFF);
+            buf[i + 1] = (byte) ((clipped >> 8) & 0xFF);
+        }
     }
 
     @Override

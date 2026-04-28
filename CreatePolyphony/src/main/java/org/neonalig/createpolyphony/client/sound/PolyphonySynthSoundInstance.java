@@ -10,8 +10,10 @@ import net.minecraft.client.sounds.SoundBufferLibrary;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.valueproviders.ConstantFloat;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.neonalig.createpolyphony.Config;
@@ -83,8 +85,15 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         super(SYNTH_LOCATION, Config.synthSoundSource(), RandomSource.create());
         this.synth = synth;
         this.maxDistanceBlocks = Math.max(16, maxDistanceBlocks);
-        // attenuationDistance is expressed in 16-block sound units.
-        int attenuationField = Math.max(1, this.maxDistanceBlocks / 16);
+        // MC's SoundEngine passes Sound#getAttenuationDistance() *directly* to
+        // Channel.linearAttenuation, which sets it as OpenAL's AL_MAX_DISTANCE
+        // in world-block units (positions are alSource3f'd in raw block coords).
+        // Multiply by the falloff multiplier so larger values keep instruments
+        // loud closer to the source (gentler falloff curve) without changing
+        // the routing/audible-distance budget enforced by the server.
+        double falloffMult = Math.max(0.1D, Config.falloffMultiplier());
+        int attenuationField = (int) Math.max(1, Math.min(Short.MAX_VALUE,
+            Math.round(this.maxDistanceBlocks * falloffMult)));
         this.syntheticSound = new Sound(
             SYNTH_LOCATION,
             ConstantFloat.of(1.0F),
@@ -93,7 +102,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
             Sound.Type.FILE,
             true,                 // stream
             false,                // preload
-            attenuationField      // attenuation distance (in SoundManager units)
+            attenuationField      // attenuation distance (blocks; OpenAL AL_MAX_DISTANCE)
         );
         this.sound = syntheticSound;
         this.syntheticEvents = new WeighedSoundEvents(SYNTH_LOCATION, null);
@@ -106,7 +115,14 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         // For self-play the source tracks the player (distance ≈ 0 → full volume,
         // centre pan). For external sources the source stays at the holder position.
         this.relative = false;
-        this.attenuation = Attenuation.LINEAR;
+        // We deliberately disable OpenAL's distance attenuation and instead apply
+        // a manual 3D linear falloff in {@link #tick()}. Empirically MC + OpenAL
+        // Soft's per-source linear distance model on a streamed mono source ends
+        // up effectively flattening the Y axis (vertical separation pans correctly
+        // but does not reduce gain), so we compute volume ourselves from the true
+        // 3D distance to guarantee Y is honoured. Panning still works because the
+        // source is positioned in world space via {@code relative=false}.
+        this.attenuation = Attenuation.NONE;
     }
 
     public int maxDistanceBlocks() {
@@ -129,7 +145,13 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
      */
     @Override
     public CompletableFuture<AudioStream> getStream(SoundBufferLibrary soundBuffers, Sound sound, boolean looping) {
-        return CompletableFuture.completedFuture(new PolyphonyAudioStream(synth));
+        // Apply the configured PCM gain (self vs non-self) live, so toggling
+        // the held instrument or editing config takes effect on the next read.
+        return CompletableFuture.completedFuture(new PolyphonyAudioStream(synth, this::currentPcmGain));
+    }
+
+    private double currentPcmGain() {
+        return selfPlay ? Config.selfPlayVolume() : Config.otherPlayVolume();
     }
 
     @Override
@@ -174,12 +196,15 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
             this.x = p.getX();
             this.y = p.getY();
             this.z = p.getZ();
+            this.volume = 1.0F;
         } else {
             // External source: keep at the last-reported holder position so
-            // OpenAL computes correct distance attenuation and stereo panning.
+            // OpenAL computes correct stereo panning. We compute distance
+            // attenuation ourselves below to ensure Y is included.
             this.x = srcX;
             this.y = srcY;
             this.z = srcZ;
+            this.volume = computeDistanceVolume(p);
         }
 
         // Defensive: retire if the synth was closed (e.g. soundfont swap).
@@ -194,5 +219,29 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         // default behaviour drops zero-volume sounds before play(); overriding
         // this prevents that and keeps our stream warm for the next NoteOn.
         return true;
+    }
+
+    /**
+     * Compute a 3D linear distance falloff from the listener (camera) to the
+     * source position. Mirrors OpenAL's {@code AL_LINEAR_DISTANCE} model
+     * ({@code gain = 1 - distance / max}, clamped to [0, 1]) but uses the full
+     * 3D distance so vertical separation reduces volume just like horizontal
+     * separation does. The maximum hearable distance is scaled by
+     * {@link Config#falloffMultiplier()} so larger values carry further within
+     * the same audible-distance budget.
+     */
+    private float computeDistanceVolume(LocalPlayer listener) {
+        Vec3 listenerPos = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+        if (listenerPos == null) {
+            listenerPos = listener.position();
+        }
+        double dx = srcX - listenerPos.x;
+        double dy = srcY - listenerPos.y;
+        double dz = srcZ - listenerPos.z;
+        double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        double falloffMult = Math.max(0.1D, Config.falloffMultiplier());
+        double maxDist = Math.max(1.0D, this.maxDistanceBlocks * falloffMult);
+        double linear = 1.0D - (dist / maxDist);
+        return (float) Mth.clamp(linear, 0.0D, 1.0D);
     }
 }
