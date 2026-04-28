@@ -457,6 +457,19 @@ public final class PolyphonyLinkManager {
                 program, channel, command, note, velocity,
                 true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
                 holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+
+            // Also broadcast to nearby observers so they can hear the player positionally.
+            for (ServerPlayer watcher : trackerLevel.players()) {
+                if (watcher == directPlayer) continue; // already sent selfPlay above
+                if (isNoteOn) {
+                    double watcherDistSq = watcher.distanceToSqr(pp.x, pp.y, pp.z);
+                    if (watcherDistSq > maxDistSq) continue;
+                }
+                PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
+                    program, channel, command, note, velocity,
+                    false, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
+                    holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+            }
             return true;
         }
 
