@@ -205,13 +205,13 @@ These are exposed through NeoForge config and the in-game config screen extensio
 
 ## Project Structure (Key Paths)
 
-* [org.neonalig.createpolyphony/link/](tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/link/) - link state, routing, interaction handlers, advancements
-* [org.neonalig.createpolyphony/mixin/](tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/mixin/) - tracker/deployer integration hooks
-* [org.neonalig.createpolyphony/client/](tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/client/) - client lifecycle, GUI, note handling
-* [org.neonalig.createpolyphony/client/sound/](tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/client/sound/) - soundfont manager + synth sound instances
-* [org.neonalig.createpolyphony/synth/](tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/synth/) - synthesis engine wrappers and audio buffering
-* [src/main/resources/data/createpolyphony/](tree/main/CreatePolyphony/src/main/resources/data/createpolyphony/) - recipes, tags, advancements
-* [src/main/resources/assets/createpolyphony/](tree/main/CreatePolyphony/src/main/resources/assets/createpolyphony/) - lang, textures, models
+* [org.neonalig.createpolyphony/link/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/link/) - link state, routing, interaction handlers, advancements
+* [org.neonalig.createpolyphony/mixin/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/mixin/) - tracker/deployer integration hooks
+* [org.neonalig.createpolyphony/client/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/client/) - client lifecycle, GUI, note handling
+* [org.neonalig.createpolyphony/client/sound/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/client/sound/) - soundfont manager + synth sound instances
+* [org.neonalig.createpolyphony/synth/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/java/org/neonalig/createpolyphony/synth/) - synthesis engine wrappers and audio buffering
+* [src/main/resources/data/createpolyphony/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/resources/data/createpolyphony/) - recipes, tags, advancements
+* [src/main/resources/assets/createpolyphony/](https://github.com/Neonalig/CreatePolyphony/tree/main/CreatePolyphony/src/main/resources/assets/createpolyphony/) - lang, textures, models
 
 ## Troubleshooting
 
