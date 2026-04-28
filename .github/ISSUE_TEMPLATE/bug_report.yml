@@ -1,0 +1,90 @@
+name: Bug Report
+description: Report a crash, incorrect behaviour, or broken feature.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill this out. The more detail you provide, the faster the bug can be fixed.
+        Please search existing issues before submitting to avoid duplicates.
+
+  - type: input
+    id: mod-version
+    attributes:
+      label: Mod Version
+      description: The version of Create:Polyphony you are using.
+      placeholder: "e.g. 1.0.3"
+    validations:
+      required: true
+
+  - type: input
+    id: mc-version
+    attributes:
+      label: Minecraft Version
+      placeholder: "e.g. 1.21.1"
+    validations:
+      required: true
+
+  - type: input
+    id: neoforge-version
+    attributes:
+      label: NeoForge Version
+      placeholder: "e.g. 21.1.77"
+    validations:
+      required: true
+
+  - type: input
+    id: sos-version
+    attributes:
+      label: Create:Sound of Steam Version
+      placeholder: "e.g. 0.5.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: "When I do X, Y happens instead of Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Place a Tracker Bar.
+        2. Link a Piano with right-click.
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Crash Report / Logs
+      description: Paste the relevant section of `run/logs/latest.log` or the full crash report. Use a code block or link to a paste site.
+      render: text
+
+  - type: textarea
+    id: modlist
+    attributes:
+      label: Mod List
+      description: Paste your full mod list if you suspect a conflict.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context
+      description: Screenshots, videos, or anything else that might help.

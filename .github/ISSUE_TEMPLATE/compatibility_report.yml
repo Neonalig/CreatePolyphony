@@ -1,0 +1,75 @@
+name: Compatibility Report
+description: Report an incompatibility with another mod or platform.
+title: "[Compat]: "
+labels: ["compatibility", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template if Create:Polyphony conflicts with, crashes alongside, or behaves incorrectly when another mod is present.
+
+  - type: input
+    id: mod-version
+    attributes:
+      label: Create:Polyphony Version
+      placeholder: "e.g. 1.0.3"
+    validations:
+      required: true
+
+  - type: input
+    id: mc-version
+    attributes:
+      label: Minecraft Version
+      placeholder: "e.g. 1.21.1"
+    validations:
+      required: true
+
+  - type: input
+    id: conflicting-mod
+    attributes:
+      label: Conflicting Mod and Version
+      placeholder: "e.g. ImmersiveEngineering 11.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: conflict-type
+    attributes:
+      label: Conflict Type
+      options:
+        - Crash on startup
+        - Crash in-game
+        - Visual / rendering glitch
+        - Audio issue
+        - Routing / MIDI issue
+        - Feature broken or unavailable
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What goes wrong and under what conditions?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Crash Report / Logs
+      render: text
+
+  - type: textarea
+    id: modlist
+    attributes:
+      label: Full Mod List
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context

@@ -1,0 +1,63 @@
+name: Feature Request
+description: Suggest a new instrument, mechanic, config option, or other improvement.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please search existing issues before submitting to avoid duplicates.
+        Feature requests are considered but not guaranteed - the more context you provide, the better.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New instrument
+        - Routing / channel logic
+        - SoundFont / audio
+        - Create automation integration
+        - Configuration option
+        - UI / UX
+        - Developer / API
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A short one-sentence description of what you are requesting.
+      placeholder: "Add support for X so that Y."
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: What problem does this solve, or what use case does it enable?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe your preferred solution. Include any implementation ideas if you have them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any workarounds or alternative approaches you have already tried or thought about.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context
+      description: Reference issues, mods, or screenshots that help illustrate the request.

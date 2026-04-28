@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Wiki - Troubleshooting
+    url: https://github.com/Neonalig/CreatePolyphony/wiki/Troubleshooting
+    about: Check here first - common problems and fixes are documented in the wiki.
+  - name: Wiki - Getting Started
+    url: https://github.com/Neonalig/CreatePolyphony/wiki/Installation
+    about: Installation steps, SoundFont setup, and first-time configuration.
+  - name: Discussions
+    url: https://github.com/Neonalig/CreatePolyphony/discussions
+    about: General questions, ideas, and show-and-tell go here rather than in issues.
