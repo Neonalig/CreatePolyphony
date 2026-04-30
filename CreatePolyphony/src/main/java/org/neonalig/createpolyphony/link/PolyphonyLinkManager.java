@@ -92,6 +92,31 @@ public final class PolyphonyLinkManager {
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
     /** Per-tracker guard window that drops delayed NoteOn events immediately after transport stop. */
     private static final Map<LinkKey, Long> TRACKER_STOP_SUPPRESSION_UNTIL = new HashMap<>();
+    /**
+     * Per-tracker last-activity tick. Updated for every MIDI event passing
+     * through {@link #dispatchNote} (NoteOn, NoteOff, ProgramChange, CC -
+     * literally anything). The level-tick watchdog
+     * {@link #pruneAbandonedTrackers} compares this against {@code currentTick}
+     * and, if the tracker has gone silent while still owning in-flight notes,
+     * fires {@link #onTrackerStopped} so mobs/deployers/etc. that received
+     * sustaining NoteOns get explicit NoteOffs instead of holding the voice
+     * forever (which is the user-visible symptom: "stop the tracker, mob still
+     * rings the last note").
+     */
+    private static final Map<LinkKey, Long> LAST_TRACKER_ACTIVITY_TICK = new HashMap<>();
+    /**
+     * Window of inactivity, in ticks, after which a tracker that still owns
+     * tracked notes is presumed stopped and its tracked notes are released.
+     *
+     * <p>Tuning rationale: a normal MIDI stream emits something (CC, tempo
+     * meta, drum hits, melody NoteOn/Off) far more frequently than this. A
+     * legitimately-sustained chord with zero accompanying events for a full
+     * 1.5 s is rare even on sparse tracks, while a player pressing "Stop" on
+     * a tracker bar produces exactly that signature: an in-flight note and no
+     * subsequent events at all. Erring on this side keeps the recovery
+     * responsive without falsely chopping long-tail pads.</p>
+     */
+    private static final long TRACKER_INACTIVITY_FLUSH_TICKS = 30;
     /** Expiration state for transient automation holders (deployer interactions, depot/ground stack targets). */
     private static final Map<UUID, TransientHolderState> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
 
@@ -167,6 +192,7 @@ public final class PolyphonyLinkManager {
     public static void onLevelTick(ServerLevel level) {
         pruneExpiredTransientHolders(level);
         pruneExpiredStopSuppression(level);
+        pruneAbandonedTrackers(level);
         long gameTime = level.getGameTime();
         if (gameTime % MOB_SYNC_INTERVAL_TICKS != 0) return;
         syncMobHolders(level);
@@ -311,6 +337,12 @@ public final class PolyphonyLinkManager {
         int command = status & 0xF0;
         int channel = status & 0x0F;
         LinkKey key = LinkKey.of(level, pos);
+
+        // Stamp activity for the abandoned-tracker watchdog. Any event from
+        // the tracker (NoteOn, NoteOff, CC, ProgramChange, system) counts as
+        // "still alive". When this stops being updated while we still own
+        // in-flight notes, pruneAbandonedTrackers releases them.
+        LAST_TRACKER_ACTIVITY_TICK.put(key, currentServerTick(level.getServer()));
 
         if (command == 0xC0 /* ProgramChange */) {
             rememberChannelProgram(key, channel, data1 & 0x7F);
@@ -874,6 +906,47 @@ public final class PolyphonyLinkManager {
         String levelPath = level.dimension().location().toString();
         TRACKER_STOP_SUPPRESSION_UNTIL.entrySet().removeIf(entry ->
             levelPath.equals(entry.getKey().levelPath()) && entry.getValue() <= now);
+    }
+
+    /**
+     * Watchdog: any tracker in this level whose last MIDI activity was more
+     * than {@link #TRACKER_INACTIVITY_FLUSH_TICKS} ago AND that still owns
+     * in-flight tracked notes is presumed to have stopped without sending the
+     * matching NoteOffs (player pressed stop, sequencer was halted from a UI,
+     * tracker was de-powered, etc.). Run {@link #onTrackerStopped} to release
+     * those tracked notes so non-player holders (mobs, deployers) don't ring
+     * the last NoteOn forever.
+     *
+     * <p>The activity timestamp is also forgotten for trackers that no longer
+     * own any tracked notes - keeping the map from growing without bound when
+     * many one-shot trackers come and go around the world.</p>
+     */
+    private static void pruneAbandonedTrackers(ServerLevel level) {
+        if (LAST_TRACKER_ACTIVITY_TICK.isEmpty()) return;
+        long now = currentServerTick(level.getServer());
+        String levelPath = level.dimension().location().toString();
+
+        for (Map.Entry<LinkKey, Long> entry : Map.copyOf(LAST_TRACKER_ACTIVITY_TICK).entrySet()) {
+            LinkKey key = entry.getKey();
+            if (!levelPath.equals(key.levelPath())) continue;
+
+            long lastActivity = entry.getValue();
+            if (now - lastActivity < TRACKER_INACTIVITY_FLUSH_TICKS) continue;
+
+            // No tracked notes: this tracker isn't holding anything, just retire
+            // its activity record so we don't scan it again.
+            Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
+            if (byNote == null || byNote.isEmpty()) {
+                LAST_TRACKER_ACTIVITY_TICK.remove(key);
+                continue;
+            }
+
+            // Has tracked notes AND has gone silent: presume stopped and flush.
+            // onTrackerStopped sends explicit NoteOff packets for every tracked
+            // owner, which is what makes mobs/deployers/etc. stop ringing.
+            onTrackerStopped(level, key.pos());
+            LAST_TRACKER_ACTIVITY_TICK.remove(key);
+        }
     }
 
 
