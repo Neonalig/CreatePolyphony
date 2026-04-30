@@ -736,17 +736,26 @@ public final class PolyphonyLinkManager {
     /**
      * Broadcasts a per-bus stop sentinel ({@code command=0xF0, note=1}) to the
      * holder (selfPlay) and every player in {@code level} so all clients with
-     * a matching {@code SourceBus} silence it at once. The packet is dispatched
-     * with {@code serverNanos=0} so the client bypasses the scheduler and
-     * applies it immediately.
+     * a matching {@code SourceBus} silence it at once.
+     *
+     * <p>The packet carries {@code serverNanos = System.nanoTime()} (the
+     * server-side emit time of the stop, <i>not</i> {@code 0L}). Any in-flight
+     * NoteOn/NoteOff that the upstream MIDI sequencer emitted before this stop
+     * therefore has a strictly smaller {@code serverNanos}, which lets the
+     * client identify and drop those late packets instead of letting them
+     * spawn a fresh {@link org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler
+     * SourceBus} after the panic. (The 0xF0 path on the client bypasses the
+     * scheduler regardless of the timestamp, so encoding the emit time here
+     * doesn't delay the silence.)</p>
      */
     private static void sendBusStopPacket(ServerLevel level, BlockPos trackerPos, UUID realHolderId, UUID sourceBusId) {
         int maxDistanceBlocksInt = simulationDistanceBlocks(level.getServer());
+        long stopNanos = System.nanoTime();
         PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(
             0, 0, 0xF0, 1, 0,
             false, (float) trackerPos.getX(), (float) trackerPos.getY(), (float) trackerPos.getZ(),
             maxDistanceBlocksInt,
-            sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), 0L);
+            sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), stopNanos);
 
         // Direct send to the holder if they're an online player so they hear their
         // own bus stop instantly, regardless of where they wandered.

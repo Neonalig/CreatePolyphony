@@ -116,6 +116,35 @@ public final class PolyphonyClientNoteHandler {
     private static final ArrayDeque<PooledSynth> IDLE_SYNTH_POOL = new ArrayDeque<>();
     private static int lastSoundfontGeneration = Integer.MIN_VALUE;
 
+    /**
+     * Per-bus stop watermarks: source bus UUID -> server-side {@link System#nanoTime()}
+     * stamp captured by {@link org.neonalig.createpolyphony.link.PolyphonyLinkManager}
+     * at the moment it issued the bus-stop sentinel.
+     *
+     * <p>The point of this map is to discard <i>late</i> NoteOn/NoteOff packets
+     * that the upstream MIDI sequencer emitted before the holder lost their
+     * instrument but only arrived (or only fired off the scheduler) after the
+     * stop. Without this filter, such an in-flight packet would happily build
+     * a brand-new {@link SourceBus} for the same deterministic source UUID and
+     * play a brief audible chunk right after we panicked the bus - exactly the
+     * "audio hangs that fade out after putting away" symptom.</p>
+     *
+     * <p>An incoming non-panic event is dropped iff
+     * {@code event.serverNanos() <= stop.serverNanos()} for the same bus.
+     * Server-stop packets and force-stop NoteOffs both use a server-side
+     * monotonic {@code System.nanoTime()} clock, so the comparison is well
+     * defined.</p>
+     *
+     * <p>Soft-capped at {@link #STOP_WATERMARK_CAP} entries to avoid unbounded
+     * growth; the oldest entry is evicted on overflow. Re-equipping a holder's
+     * instrument naturally produces fresh server-emit times that compare
+     * <i>greater</i> than the recorded watermark, so the bus comes back to
+     * life automatically without any explicit clear.</p>
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<UUID, Long> STOP_WATERMARKS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int STOP_WATERMARK_CAP = 128;
+
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
     private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
 
@@ -159,12 +188,27 @@ public final class PolyphonyClientNoteHandler {
             if (sub == 1) {
                 debugNote("panic-bus", payload);
                 UUID busId = new UUID(payload.sourceMost(), payload.sourceLeast());
+                // Record the stop watermark BEFORE the actual bus close so that any
+                // late packet for the same bus that races us in on the network
+                // thread (or fires off the scheduler on the main thread later) is
+                // already filtered against the watermark.
+                recordStopWatermark(busId, payload.serverNanos());
                 Minecraft.getInstance().execute(() -> stopBus(busId));
                 return;
             }
             debugNote("panic", payload);
             PolyphonyEventScheduler.flushAll();
             Minecraft.getInstance().execute(PolyphonyClientNoteHandler::panic);
+            return;
+        }
+
+        // Drop late packets that the server emitted before the bus was stopped.
+        // The scheduler look-ahead means a NoteOn captured a few ticks ago can
+        // still be parked on the dispatch thread even after we panic the bus on
+        // the client; without this filter it would happily build a fresh
+        // SourceBus and play a brief audible tail right after unequip.
+        if (isStaleAfterStop(payload)) {
+            debugNote("drop:post-stop-stale", payload);
             return;
         }
 
@@ -222,6 +266,15 @@ public final class PolyphonyClientNoteHandler {
         }
 
         UUID sourceId = new UUID(payload.sourceMost(), payload.sourceLeast());
+        // Re-check the stop watermark here too: ingest() filtered the packet at
+        // arrival time, but this method is what runs after the scheduler delay,
+        // so a late stop sentinel that landed AFTER ingest scheduled this event
+        // could still try to spawn a fresh bus if we trusted the queued event
+        // alone. The watermark map is the single source of truth.
+        if (isStaleAfterStop(payload)) {
+            debugNote("drop:post-stop-stale", payload);
+            return;
+        }
         boolean noteOn = payload.isNoteOn();
         SourceBus bus = SOURCE_BUSES.get(sourceId);
         if (bus == null && !noteOn) {
@@ -324,6 +377,12 @@ public final class PolyphonyClientNoteHandler {
                 closeQuietly(IDLE_SYNTH_POOL.removeFirst().synth());
             }
         }
+        // Watermarks were keyed against the previous session's server-nanoTime
+        // clock; on a fresh global stop (dimension change, world reload, panic)
+        // a new server may produce smaller nanoTime values than the stale
+        // watermarks we kept around, which would deadlock all subsequent buses
+        // into "stale" territory. Drop them so the new session starts clean.
+        STOP_WATERMARKS.clear();
     }
 
     private static void pruneIdleBuses(int nowTick) {
@@ -478,6 +537,54 @@ public final class PolyphonyClientNoteHandler {
     private static void closeQuietly(PolyphonySynthesizer synth) {
         try { synth.allNotesOff(); } catch (Throwable ignored) { }
         try { synth.close(); } catch (Throwable ignored) { }
+    }
+
+    /**
+     * Returns {@code true} when the given non-panic payload was emitted on the
+     * server before the most recent stop watermark for its source bus, i.e. it
+     * is an in-flight packet from before unequip and must not be allowed to
+     * resurrect the silenced bus.
+     *
+     * <p>{@code payload.serverNanos() == 0} packets (immediate-delivery
+     * server-initiated stops) are never considered stale - they have no
+     * meaningful emit time and we always want them to take effect.</p>
+     */
+    private static boolean isStaleAfterStop(PlayInstrumentNotePayload payload) {
+        long eventNanos = payload.serverNanos();
+        if (eventNanos == 0L) return false;
+        UUID busId = new UUID(payload.sourceMost(), payload.sourceLeast());
+        Long stopNanos = STOP_WATERMARKS.get(busId);
+        if (stopNanos == null) return false;
+        // <= so that an event emitted in the same nanoTime tick as the stop
+        // still loses (the stop wins ties; better to drop one borderline note
+        // than to leak a hanging chunk).
+        return eventNanos <= stopNanos;
+    }
+
+    /**
+     * Record / refresh the per-bus stop watermark. If a watermark already
+     * exists we keep the larger of the two, so out-of-order delivery of two
+     * stop packets for the same bus can never lower the bar.
+     */
+    private static void recordStopWatermark(UUID busId, long serverNanos) {
+        if (serverNanos == 0L) return; // legacy / fallback: nothing to compare against
+        STOP_WATERMARKS.merge(busId, serverNanos, Math::max);
+        // Soft cap. ConcurrentHashMap doesn't expose insertion order, so we use
+        // a "evict any oldest-by-value" pass when over the cap. Stop watermarks
+        // are monotonically increasing per bus, so smallest value across buses
+        // is a reasonable approximation of "oldest stop".
+        if (STOP_WATERMARKS.size() <= STOP_WATERMARK_CAP) return;
+        UUID oldest = null;
+        long oldestNanos = Long.MAX_VALUE;
+        for (Map.Entry<UUID, Long> e : STOP_WATERMARKS.entrySet()) {
+            if (e.getValue() < oldestNanos) {
+                oldestNanos = e.getValue();
+                oldest = e.getKey();
+            }
+        }
+        if (oldest != null) {
+            STOP_WATERMARKS.remove(oldest, oldestNanos);
+        }
     }
 
     /** Emergency hard-stop for all local synth output. */
