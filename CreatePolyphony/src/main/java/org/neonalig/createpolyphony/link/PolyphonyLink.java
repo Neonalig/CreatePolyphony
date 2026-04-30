@@ -5,6 +5,7 @@ import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -28,19 +29,30 @@ import java.util.UUID;
  *         <li>Drum-kit holder: receives only channel 9.</li>
  *       </ul>
  *   </li>
- *   <li>Otherwise, for each MIDI channel 0-15:
- *       <ol type="a">
- *         <li>Determine the channel's "preferred" {@link InstrumentFamily} from
- *             its current GM program (or {@link InstrumentFamily#DRUM_KIT} for
- *             channel 9 by GM convention).</li>
- *       <li>Among linked participants, first claim channels whose preferred
- *             family is directly matched.</li>
- *         <li>After all preferred claims, assign any unclaimed channels via
- *             deterministic round-robin over eligible participants so remaining
- *             channels are split evenly.</li>
- *       </ol>
- *   </li>
+ *   <li>Otherwise, for each MIDI channel 0-15, <b>every eligible participant</b>
+ *       is added to the channel's assignee list. Eligibility is the existing
+ *       drum-vs-melodic gate plus any tracker frequency-key item filter. The
+ *       server dispatches a separate note packet per assignee, so each linked
+ *       instrument produces audible sound simultaneously - even on a single
+ *       MIDI channel - which is the long-standing user expectation when
+ *       multiple instruments are linked at once.</li>
  * </ol>
+ *
+ * <p>Each {@link Participant} carries its own <em>source bus UUID</em> derived
+ * from {@code (realHolderId, hand-slot)} so the client keys an independent
+ * audio bus per held instrument. That is what lets a player hear their main
+ * hand and off hand simultaneously (or a player and a deployer at the same
+ * time): different bus IDs land in different client {@code SourceBus}
+ * entries, each with its own synth + stream, so timbres mix at the OpenAL
+ * layer instead of fighting over a single per-holder bus.</p>
+ *
+ * <p>The previous "one channel = one assignee" routing assigned every channel
+ * to whichever participant's family matched the channel's GM program - which
+ * with two same-family holders (e.g. two pianos) or with default piano on a
+ * single-channel song meant one holder claimed everything and the others were
+ * silent. Sending each note to every eligible participant fixes that without
+ * regressing drum/melodic separation: drums still only fire on channel 9,
+ * melodic instruments still skip channel 9.</p>
  *
  * <p>This class is <b>logical-server-side only</b>. It is not Mixin-state; it
  * lives in {@link PolyphonyLinkManager} and is mutated only on the server
@@ -66,8 +78,12 @@ public final class PolyphonyLink {
     /** Last seen GM program number per MIDI channel (0-15). -1 means "unknown / not yet seen". */
     private final int[] channelPrograms = new int[16];
 
-    /** Cached assignment: channel index -&gt; participant that should render it. */
-    private final ChannelAssignee[] channelAssignments = new ChannelAssignee[16];
+    /**
+     * Cached assignment: channel index -&gt; every participant that should render it.
+     * Empty list (never {@code null}) when no participant is eligible for the channel.
+     */
+    @SuppressWarnings("unchecked")
+    private final List<ChannelAssignee>[] channelAssignments = (List<ChannelAssignee>[]) new List<?>[16];
     /** Optional per-channel instrument item filter copied from tracker frequency slots. */
     private final Item[] channelFilterItems = new Item[16];
 
@@ -75,7 +91,7 @@ public final class PolyphonyLink {
         this.levelKey = levelKey;
         this.pos = pos.immutable();
         Arrays.fill(channelPrograms, -1);
-        Arrays.fill(channelAssignments, null);
+        Arrays.fill(channelAssignments, List.of());
     }
 
     public String levelKey() { return levelKey; }
@@ -170,99 +186,46 @@ public final class PolyphonyLink {
     }
 
     /**
-     * Returns the participant currently assigned to play the given MIDI
-     * channel, or {@code null} if no linked players exist.
+     * Returns every participant currently assigned to play the given MIDI
+     * channel. Empty list when no linked player is eligible for the channel.
+     * The returned list is immutable and safe to iterate without external
+     * synchronisation; callers should iterate it once per dispatched event.
      */
-    @Nullable
-    public ChannelAssignee assigneeFor(int channel) {
-        if (channel < 0 || channel > 15) return null;
-        return channelAssignments[channel];
+    public List<ChannelAssignee> assigneesFor(int channel) {
+        if (channel < 0 || channel > 15) return List.of();
+        List<ChannelAssignee> list = channelAssignments[channel];
+        return list != null ? list : List.of();
     }
 
     // ---- internals -----------------------------------------------------------------------------
 
     /**
      * Recompute {@link #channelAssignments} from {@link #players} and
-     * {@link #channelPrograms}. O(16 * P) where P = linked-player count, so
+     * {@link #channelPrograms}. O(16 * P) where P = participant count, so
      * effectively constant.
+     *
+     * <p>For each channel, every {@linkplain #isEligibleForChannel eligible}
+     * participant is assigned. The note dispatcher then sends one packet per
+     * assignee, each tagged with the participant's distinct {@code sourceBusId}
+     * so the client renders them on independent synths - which is what makes
+     * multiple held instruments audible simultaneously.</p>
      */
     private void recomputeAssignments() {
-        Arrays.fill(channelAssignments, null);
+        Arrays.fill(channelAssignments, List.of());
         if (players.isEmpty()) return;
 
         List<Participant> participants = orderedParticipants();
         if (participants.isEmpty()) return;
 
-        // Solo policy with optional channel-filter overrides from tracker frequency keys.
-        if (participants.size() == 1) {
-            Participant only = participants.get(0);
-            for (int ch = 0; ch < 16; ch++) {
-                channelAssignments[ch] = isEligibleForChannel(only, ch) ? only.assignee() : null;
-            }
-            return;
-        }
-
-        // Phase 1: preferred-family claims.
-        int[] load = new int[participants.size()];
-        boolean[] claimed = new boolean[16];
         for (int ch = 0; ch < 16; ch++) {
-            InstrumentFamily preferred = InstrumentFamily.forMidiChannelAndProgram(
-                ch,
-                // -1 (unknown program) defaults to GM 0 = Acoustic Grand Piano.
-                channelPrograms[ch] >= 0 ? channelPrograms[ch] : 0
-            );
-
-            int winner = pickLeastLoadedMatching(participants, load, preferred, ch);
-            if (winner >= 0) {
-                channelAssignments[ch] = participants.get(winner).assignee();
-                load[winner]++;
-                claimed[ch] = true;
+            List<ChannelAssignee> list = null;
+            for (Participant p : participants) {
+                if (!isEligibleForChannel(p, ch)) continue;
+                if (list == null) list = new ArrayList<>(participants.size());
+                list.add(p.assignee());
             }
+            channelAssignments[ch] = list == null ? List.of() : List.copyOf(list);
         }
-
-        // Phase 2: deterministic round-robin for channels left unclaimed.
-        int fallbackCursor = 0;
-        for (int ch = 0; ch < 16; ch++) {
-            if (claimed[ch]) continue;
-            int winner = pickRoundRobinEligible(participants, fallbackCursor, ch);
-            if (winner < 0) continue;
-            channelAssignments[ch] = participants.get(winner).assignee();
-            load[winner]++;
-            fallbackCursor = (winner + 1) % participants.size();
-        }
-    }
-
-    private static int pickLeastLoadedMatching(List<Participant> participants,
-                                               int[] load,
-                                               InstrumentFamily preferred,
-                                               int channel) {
-        int best = -1;
-        int bestLoad = Integer.MAX_VALUE;
-        for (int i = 0; i < participants.size(); i++) {
-            Participant lp = participants.get(i);
-            if (lp.family != preferred) continue;
-            if (!isEligibleForChannel(lp, channel)) continue;
-            int l = load[i];
-            if (l < bestLoad) {
-                bestLoad = l;
-                best = i;
-            }
-        }
-        return best;
-    }
-
-    private static int pickRoundRobinEligible(List<Participant> participants,
-                                              int cursor,
-                                               int channel) {
-        if (participants.isEmpty()) return -1;
-        int size = participants.size();
-        for (int i = 0; i < size; i++) {
-            int idx = (cursor + i) % size;
-            Participant p = participants.get(idx);
-            if (!isEligibleForChannel(p, channel)) continue;
-            return idx;
-        }
-        return -1;
     }
 
     private static boolean isEligibleForChannel(Participant p, int channel) {
@@ -282,13 +245,32 @@ public final class PolyphonyLink {
         List<Participant> out = new ArrayList<>(players.size() * 2);
         for (LinkedPlayer player : players.values()) {
             if (player.mainHandFamily() != null) {
-                out.add(new Participant(player.id(), player.mainHandFamily(), channelMaskForItem(player.mainHandItem())));
+                out.add(new Participant(player.id(),
+                    deriveSourceBusId(player.id(), HandSlot.MAIN_HAND),
+                    player.mainHandFamily(),
+                    channelMaskForItem(player.mainHandItem())));
             }
             if (player.offHandFamily() != null) {
-                out.add(new Participant(player.id(), player.offHandFamily(), channelMaskForItem(player.offHandItem())));
+                out.add(new Participant(player.id(),
+                    deriveSourceBusId(player.id(), HandSlot.OFF_HAND),
+                    player.offHandFamily(),
+                    channelMaskForItem(player.offHandItem())));
             }
         }
         return out;
+    }
+
+    /**
+     * Stable, deterministic per-(holder, hand) UUID for client bus keying.
+     * Using {@link UUID#nameUUIDFromBytes(byte[])} keeps the value
+     * reproducible across sessions and crash-safe (no transient counters)
+     * while ensuring main and off hand of the same holder never collide on
+     * the same client {@code SourceBus}, which would coalesce both into one
+     * synth and silence one of the timbres.
+     */
+    private static UUID deriveSourceBusId(UUID realHolderId, HandSlot slot) {
+        String key = realHolderId.toString() + ":hand:" + slot.name();
+        return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 
     private int channelMaskForItem(@Nullable Item instrumentItem) {
@@ -319,12 +301,26 @@ public final class PolyphonyLink {
         }
     }
 
-    /** Immutable assignee metadata used by the note dispatcher. */
-    public record ChannelAssignee(UUID playerId, InstrumentFamily family) { }
+    /**
+     * Immutable assignee metadata used by the note dispatcher.
+     *
+     * @param realHolderId the actual player/mob/automation holder UUID, used
+     *                    server-side for player resolution and selfPlay flag.
+     * @param sourceBusId  per-(holder, hand) derived UUID transmitted to the
+     *                    client as the audio bus key so independent timbres
+     *                    don't collide on a single per-holder synth.
+     * @param family       the held instrument family driving the playback timbre.
+     */
+    public record ChannelAssignee(UUID realHolderId, UUID sourceBusId, InstrumentFamily family) { }
 
-    private record Participant(UUID playerId, InstrumentFamily family, int filteredMask) {
+    private record Participant(UUID realHolderId,
+                               UUID sourceBusId,
+                               InstrumentFamily family,
+                               int filteredMask) {
         private ChannelAssignee assignee() {
-            return new ChannelAssignee(playerId, family);
+            return new ChannelAssignee(realHolderId, sourceBusId, family);
         }
     }
+
+    private enum HandSlot { MAIN_HAND, OFF_HAND }
 }

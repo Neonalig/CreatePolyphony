@@ -27,11 +27,12 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,8 +79,15 @@ public final class PolyphonyLinkManager {
 
     /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
     private static final Map<UUID, Map<LinkKey, HeldInstruments>> ACTIVE_HAND_LINKS = new HashMap<>();
-    /** Active note ownership per link: (channel,note) -> player UUID currently expected to receive NoteOff. */
-    private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
+    /**
+     * Active note ownership per link: (channel, note) -&gt; every per-assignee
+     * client bus currently expecting a matching NoteOff. With each linked
+     * instrument routed to its own client bus, a single (channel, note) can
+     * have multiple owners (e.g. main hand + off hand both playing the same
+     * note simultaneously) and each one needs its own NoteOff packet to free
+     * the corresponding voice.
+     */
+    private static final Map<LinkKey, Map<ActiveNoteKey, List<TrackedOwner>>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
     /** Per-tracker guard window that drops delayed NoteOn events immediately after transport stop. */
@@ -175,10 +183,16 @@ public final class PolyphonyLinkManager {
     public static void onPlayerChangedDimension(ServerPlayer player) {
         // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
         UUID id = player.getUUID();
+        // Use the player's real UUID as the bus id for the panic - the client
+        // panic path stops every active SourceBus regardless of key, so this
+        // reaches all of the player's per-hand buses.
         PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
             simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
-        ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
+        ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> {
+            byNote.values().forEach(owners -> owners.removeIf(o -> id.equals(o.realHolderId())));
+            byNote.entrySet().removeIf(e -> e.getValue().isEmpty());
+        });
         ACTIVE_NOTE_OWNERS.entrySet().removeIf(e -> e.getValue().isEmpty());
     }
 
@@ -238,14 +252,16 @@ public final class PolyphonyLinkManager {
     public static void onTrackerStopped(ServerLevel level, BlockPos pos) {
         LinkKey key = LinkKey.of(level, pos);
         TRACKER_STOP_SUPPRESSION_UNTIL.put(key, currentServerTick(level.getServer()) + TRACKER_STOP_SUPPRESSION_TICKS);
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
-        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
             ActiveNoteKey active = entry.getKey();
-            UUID owner = entry.getValue();
-            Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, pos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0, 0L);
+            for (TrackedOwner owner : List.copyOf(entry.getValue())) {
+                Vec3 ownerPos = resolveHolderPosition(level, owner.realHolderId());
+                sendNotePacket(level, pos, ownerPos, owner.realHolderId(), owner.sourceBusId(),
+                    0, active.channel(), 0x80, active.note(), 0, 0L);
+            }
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
@@ -313,13 +329,20 @@ public final class PolyphonyLinkManager {
         // started by automation holders (deployers etc.) are properly stopped even
         // after their TTL has expired and their link participation has been removed.
         if (noteOff) {
-            UUID recordedOwner = consumeTrackedOwner(key, new ActiveNoteKey(channel, note));
-            if (recordedOwner != null) {
-                Vec3 recordedOwnerPos = resolveHolderPosition(level, recordedOwner);
-                if (sendNotePacket(level, pos, recordedOwnerPos, recordedOwner, 0, channel, 0x80, note, velocity, eventNanos)) {
-                    debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
-                } else {
-                    debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
+            List<TrackedOwner> recordedOwners = consumeTrackedOwners(key, new ActiveNoteKey(channel, note));
+            if (recordedOwners != null && !recordedOwners.isEmpty()) {
+                // Multiple buses can hold the same (channel, note) simultaneously
+                // when several linked instruments are routed to the same channel
+                // (e.g. main hand + off hand both playing it). Each bus needs its
+                // own NoteOff packet so the corresponding voice is freed.
+                for (TrackedOwner owner : recordedOwners) {
+                    Vec3 recordedOwnerPos = resolveHolderPosition(level, owner.realHolderId());
+                    if (sendNotePacket(level, pos, recordedOwnerPos, owner.realHolderId(), owner.sourceBusId(),
+                        0, channel, 0x80, note, velocity, eventNanos)) {
+                        debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, owner.realHolderId());
+                    } else {
+                        debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, owner.realHolderId());
+                    }
                 }
                 return;
             }
@@ -372,65 +395,95 @@ public final class PolyphonyLinkManager {
         // (Tracked NoteOff already handled above; this branch only reached if no prior
         //  track entry existed — fall through to current-assignee delivery as normal.)
 
-        PolyphonyLink.ChannelAssignee assignee = link.assigneeFor(channel);
-        if (assignee == null) {
+        List<PolyphonyLink.ChannelAssignee> assignees = link.assigneesFor(channel);
+        if (assignees.isEmpty()) {
             debugRoute("drop:no-assignee", level, pos, status, data1, data2, null);
             return;
         }
 
-        UUID assigneePlayerId = assignee.playerId();
-
-        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneePlayerId);
-        if (target != null && !holdsLinkedInstrument(target, key)) {
-            // Don't hard-drop note routing here; assignment already came from held-link sync.
-            debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneePlayerId);
-        }
-
-        // Resolve the assignee's held instrument family and force playback timbre to it.
-        // This keeps player output aligned with what they're physically holding.
-        InstrumentFamily family = assignee.family();
-
-        // Safety belt: even if assignment data got stale, keep drums isolated.
-        // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
-        if (!family.isWildcard()) {
-            if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
-                return;
-            }
-            if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
-                return;
-            }
-        }
-
-        // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
-        // supported instrument families, controlled by config.
-        int program;
-        if (family.isWildcard()) {
-            int trackedProgram = trackedProgramFor(key, channel, link);
-            if (Config.oneManBandUsesAllGmPrograms()) {
-                program = trackedProgram;
-            } else {
-                InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, trackedProgram);
-                program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
-            }
-        } else {
-            program = (channel == 9) ? 127 : family.canonicalGmProgram();
-        }
-
-        Vec3 holderPos = resolveHolderPosition(level, assigneePlayerId);
-        if (sendNotePacket(level, pos, holderPos, assigneePlayerId, program, channel, command, note, velocity, eventNanos)) {
-            if (!noteOff) {
-                UUID previousOwner = trackNoteOwner(key, activeNoteKey, assigneePlayerId);
-                if (previousOwner != null && !Objects.equals(previousOwner, assigneePlayerId)) {
-                    Vec3 previousOwnerPos = resolveHolderPosition(level, previousOwner);
-                    sendNotePacket(level, pos, previousOwnerPos, previousOwner, 0, channel, 0x80, note, 0, 0L);
-                    debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
+        // Hand off any voices owned by buses that are no longer assigned to
+        // this (channel, note) before introducing the new ones, so dropped
+        // hands/instruments don't leak hanging voices on the client.
+        if (!noteOff) {
+            List<TrackedOwner> previousOwners = ACTIVE_NOTE_OWNERS.getOrDefault(key, Map.of()).get(activeNoteKey);
+            if (previousOwners != null && !previousOwners.isEmpty()) {
+                for (TrackedOwner prev : List.copyOf(previousOwners)) {
+                    boolean stillAssigned = false;
+                    for (PolyphonyLink.ChannelAssignee a : assignees) {
+                        if (prev.sourceBusId().equals(a.sourceBusId())) {
+                            stillAssigned = true;
+                            break;
+                        }
+                    }
+                    if (stillAssigned) continue;
+                    Vec3 prevPos = resolveHolderPosition(level, prev.realHolderId());
+                    sendNotePacket(level, pos, prevPos, prev.realHolderId(), prev.sourceBusId(),
+                        0, channel, 0x80, note, 0, 0L);
+                    untrackNoteOwner(key, activeNoteKey, prev);
+                    debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, prev.realHolderId());
                 }
             }
-            debugRoute("sent", level, pos, status, data1, data2, assigneePlayerId);
-        } else {
-            debugRoute("drop:no-player", level, pos, status, data1, data2, assigneePlayerId);
+        }
+
+        // Dispatch to every eligible participant so each held instrument
+        // produces simultaneous, independently-bused audio on the client.
+        boolean anySent = false;
+        for (PolyphonyLink.ChannelAssignee assignee : assignees) {
+            UUID assigneeRealId = assignee.realHolderId();
+            UUID assigneeBusId = assignee.sourceBusId();
+
+            ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneeRealId);
+            if (target != null && !holdsLinkedInstrument(target, key)) {
+                // Don't hard-drop note routing here; assignment already came from held-link sync.
+                debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneeRealId);
+            }
+
+            // Resolve the assignee's held instrument family and force playback timbre to it.
+            // This keeps player output aligned with what they're physically holding.
+            InstrumentFamily family = assignee.family();
+
+            // Safety belt: even if assignment data got stale, keep drums isolated.
+            // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
+            if (!family.isWildcard()) {
+                if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
+                    debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assigneeRealId);
+                    continue;
+                }
+                if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
+                    debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assigneeRealId);
+                    continue;
+                }
+            }
+
+            // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
+            // supported instrument families, controlled by config.
+            int program;
+            if (family.isWildcard()) {
+                int trackedProgram = trackedProgramFor(key, channel, link);
+                if (Config.oneManBandUsesAllGmPrograms()) {
+                    program = trackedProgram;
+                } else {
+                    InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, trackedProgram);
+                    program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
+                }
+            } else {
+                program = (channel == 9) ? 127 : family.canonicalGmProgram();
+            }
+
+            Vec3 holderPos = resolveHolderPosition(level, assigneeRealId);
+            if (sendNotePacket(level, pos, holderPos, assigneeRealId, assigneeBusId,
+                program, channel, command, note, velocity, eventNanos)) {
+                anySent = true;
+                if (!noteOff) {
+                    trackNoteOwner(key, activeNoteKey, new TrackedOwner(assigneeRealId, assigneeBusId));
+                }
+                debugRoute("sent", level, pos, status, data1, data2, assigneeRealId);
+            } else {
+                debugRoute("drop:no-player", level, pos, status, data1, data2, assigneeRealId);
+            }
+        }
+        if (!anySent && !noteOff) {
+            debugRoute("drop:no-player-any", level, pos, status, data1, data2, null);
         }
     }
 
@@ -460,10 +513,14 @@ public final class PolyphonyLinkManager {
      * @param trackerPos   the tracker block position (kept for diagnostic context).
      * @param holderPos    world position of the holder (mob / deployer); ignored when
      *                     the holder resolves to a live ServerPlayer.
-     * @param holderId     UUID of the channel assignee (player UUID or non-player pseudo-UUID).
+     * @param realHolderId UUID of the actual holder (player / mob / automation), used
+     *                     for player resolution and selfPlay flag determination.
+     * @param sourceBusId  per-(holder, hand) UUID transmitted to the client as the audio
+     *                     bus key. Distinct from {@code realHolderId} so a single player
+     *                     holding two instruments produces two independent client buses.
      */
     private static boolean sendNotePacket(ServerLevel trackerLevel, BlockPos trackerPos,
-                                          @Nullable Vec3 holderPos, UUID holderId,
+                                          @Nullable Vec3 holderPos, UUID realHolderId, UUID sourceBusId,
                                           int program, int channel, int command, int note, int velocity,
                                           long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
@@ -472,7 +529,7 @@ public final class PolyphonyLinkManager {
         double maxDistSq = maxDist * maxDist;
 
         // ---- Direct player recipient ----
-        ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(holderId);
+        ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(realHolderId);
         if (directPlayer != null) {
             // Dimension gate: a holder in another dimension is not participating in this
             // tracker's audio at all (their world-space position is meaningless to listeners
@@ -487,7 +544,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
+                sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
 
             // Also broadcast to nearby observers so they can hear the player positionally.
             // Mirrors the non-player holder branch: gate by each watcher's distance to the
@@ -501,7 +558,7 @@ public final class PolyphonyLinkManager {
                 PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                     program, channel, command, note, velocity,
                     false, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                    holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
+                    sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
             }
             return true;
         }
@@ -512,7 +569,7 @@ public final class PolyphonyLinkManager {
         Vec3 srcPos = holderPos;
         if (srcPos == null) {
             if (isNoteOn) {
-                warnMissingHolderPosition(trackerLevel, trackerPos, holderId, channel, note);
+                warnMissingHolderPosition(trackerLevel, trackerPos, realHolderId, channel, note);
                 return false;
             }
             srcPos = Vec3.ZERO;
@@ -530,7 +587,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
+                sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
             sent = true;
         }
         return sent;
@@ -587,57 +644,78 @@ public final class PolyphonyLinkManager {
         return null;
     }
 
-    private static UUID trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, UUID assignee) {
-        return ACTIVE_NOTE_OWNERS
-            .computeIfAbsent(key, ignored -> new HashMap<>())
-            .put(noteKey, assignee);
+    private static void trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, TrackedOwner owner) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.computeIfAbsent(key, ignored -> new HashMap<>());
+        List<TrackedOwner> owners = byNote.computeIfAbsent(noteKey, ignored -> new ArrayList<>(2));
+        // Keep the list de-duplicated on bus id; a re-trigger of the same note
+        // by the same bus shouldn't grow the owner list unboundedly.
+        for (TrackedOwner existing : owners) {
+            if (existing.sourceBusId().equals(owner.sourceBusId())) return;
+        }
+        owners.add(owner);
+    }
+
+    private static void untrackNoteOwner(LinkKey key, ActiveNoteKey noteKey, TrackedOwner owner) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null) return;
+        List<TrackedOwner> owners = byNote.get(noteKey);
+        if (owners == null) return;
+        owners.removeIf(o -> o.sourceBusId().equals(owner.sourceBusId()));
+        if (owners.isEmpty()) byNote.remove(noteKey);
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     private static void flushTrackedNotesForChannel(ServerLevel level, BlockPos trackerPos, int channel) {
         LinkKey key = LinkKey.of(level, trackerPos);
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
-        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
             ActiveNoteKey active = entry.getKey();
             if ((active.channel() & 0x0F) != (channel & 0x0F)) continue;
-            UUID owner = entry.getValue();
-            Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, trackerPos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0, 0L);
+            for (TrackedOwner owner : List.copyOf(entry.getValue())) {
+                Vec3 ownerPos = resolveHolderPosition(level, owner.realHolderId());
+                sendNotePacket(level, trackerPos, ownerPos, owner.realHolderId(), owner.sourceBusId(),
+                    0, active.channel(), 0x80, active.note(), 0, 0L);
+            }
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     @Nullable
-    private static UUID consumeTrackedOwner(LinkKey key, ActiveNoteKey noteKey) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+    private static List<TrackedOwner> consumeTrackedOwners(LinkKey key, ActiveNoteKey noteKey) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null) return null;
-        UUID owner = byNote.remove(noteKey);
+        List<TrackedOwner> owners = byNote.remove(noteKey);
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
-        return owner;
+        return owners;
     }
 
     private static boolean hasTrackedNotes(LinkKey key) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         return byNote != null && !byNote.isEmpty();
     }
 
-    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID holderId) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID realHolderId) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
-        if (level != null) {
-            for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
-                if (!holderId.equals(entry.getValue())) continue;
-                ActiveNoteKey active = entry.getKey();
-                Vec3 holderPos = resolveHolderPosition(level, holderId);
-                sendNotePacket(level, key.pos(), holderPos, holderId, 0, active.channel(), 0x80, active.note(), 0, 0L);
-                byNote.remove(active);
+        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
+            ActiveNoteKey active = entry.getKey();
+            List<TrackedOwner> owners = entry.getValue();
+            for (TrackedOwner owner : List.copyOf(owners)) {
+                if (!realHolderId.equals(owner.realHolderId())) continue;
+                if (level != null) {
+                    Vec3 holderPos = resolveHolderPosition(level, realHolderId);
+                    sendNotePacket(level, key.pos(), holderPos, realHolderId, owner.sourceBusId(),
+                        0, active.channel(), 0x80, active.note(), 0, 0L);
+                }
+                owners.remove(owner);
             }
+            if (owners.isEmpty()) byNote.remove(active);
         }
 
-        byNote.values().removeIf(holderId::equals);
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
@@ -984,6 +1062,14 @@ public final class PolyphonyLinkManager {
     }
 
     private record ActiveNoteKey(int channel, int note) { }
+
+    /**
+     * One in-flight note's bus-level owner. {@code realHolderId} is the actual
+     * player/mob/automation holder used for player resolution and selfPlay
+     * gating; {@code sourceBusId} is the per-(holder, hand) bus key transmitted
+     * to the client so the matching NoteOff stops the correct synth voice.
+     */
+    private record TrackedOwner(UUID realHolderId, UUID sourceBusId) { }
 
     private static void debugRoute(String phase, ServerLevel level, BlockPos pos,
                                    int status, int data1, int data2, @Nullable UUID assignee) {
