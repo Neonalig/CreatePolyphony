@@ -42,6 +42,13 @@ public abstract class TrackerBarBlockEntityMixin {
      */
     @Inject(method = "handleNote(Ljavax/sound/midi/ShortMessage;)V", at = @At("HEAD"))
     private void createpolyphony$onHandleNote(ShortMessage sm, CallbackInfo ci) {
+        // Capture the nanoTime stamp as early as possible so it reflects when
+        // the upstream sequencer actually emitted this event - not when our
+        // routing/serialization work finished. The client uses this stamp,
+        // adjusted by its server-to-local clock offset and the configured
+        // look-ahead, to play the note at a precise local-clock instant.
+        long eventNanos = System.nanoTime();
+
         // TrackerBarBlockEntity transitively extends net.minecraft.world.level.block.entity.BlockEntity
         // via Create's KineticBlockEntity -> SmartBlockEntity -> SyncedBlockEntity -> BlockEntity.
         // Cast through Object so this also compiles when the SoS class isn't on the IDE classpath.
@@ -55,7 +62,7 @@ public abstract class TrackerBarBlockEntityMixin {
         int data2    = sm.getData2();
 
         try {
-            PolyphonyLinkManager.dispatchNote(sl, pos, status, data1, data2);
+            PolyphonyLinkManager.dispatchNote(sl, pos, status, data1, data2, eventNanos);
         } catch (Throwable t) {
             // Never let our hook break the tracker bar's own playback.
             // Log once and swallow.

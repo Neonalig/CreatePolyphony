@@ -12,6 +12,8 @@ import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.client.screen.SoundFontPickerScreen;
 import org.neonalig.createpolyphony.client.sound.SoundFontManager;
+import org.neonalig.createpolyphony.client.timing.PolyphonyClientClock;
+import org.neonalig.createpolyphony.client.timing.PolyphonyEventScheduler;
 
 import static net.minecraft.commands.Commands.argument;
 import static net.minecraft.commands.Commands.literal;
@@ -40,22 +42,14 @@ public final class PolyphonyClientTestCommands {
                 .then(literal("pumpChunkBytes")
                     .then(argument("value", IntegerArgumentType.integer(512, 65_536))
                         .executes(ctx -> updateConfig("pumpChunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
-                .then(literal("adaptiveMinSubchunkBytes")
-                    .then(argument("value", IntegerArgumentType.integer(256, 32_768))
-                        .executes(ctx -> updateConfig("adaptiveMinSubchunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
-                .then(literal("adaptiveMaxSubchunkBytes")
-                    .then(argument("value", IntegerArgumentType.integer(256, 65_536))
-                        .executes(ctx -> updateConfig("adaptiveMaxSubchunkBytes", IntegerArgumentType.getInteger(ctx, "value")))))
-                .then(literal("adaptiveTargetRenderNs")
-                    .then(argument("value", IntegerArgumentType.integer(250_000, 10_000_000))
-                        .executes(ctx -> updateConfig("adaptiveTargetRenderNs", IntegerArgumentType.getInteger(ctx, "value")))))
-                .then(literal("adaptiveEwmaAlpha")
-                    .then(argument("value", IntegerArgumentType.integer(1, 100))
-                        .executes(ctx -> updateConfig("adaptiveEwmaAlphaPercent", IntegerArgumentType.getInteger(ctx, "value")))))
-                .then(literal("preset")
-                    .then(literal("stable").executes(ctx -> applyPreset(Config.AudioTimingPreset.STABLE)))
-                    .then(literal("balanced").executes(ctx -> applyPreset(Config.AudioTimingPreset.BALANCED)))
-                    .then(literal("responsive").executes(ctx -> applyPreset(Config.AudioTimingPreset.RESPONSIVE)))))
+                .then(literal("schedulingDelayMs")
+                    .then(argument("value", IntegerArgumentType.integer(0, 1000))
+                        .executes(ctx -> updateConfig("schedulingDelayMs", IntegerArgumentType.getInteger(ctx, "value")))))
+                .then(literal("clockSyncIntervalMs")
+                    .then(argument("value", IntegerArgumentType.integer(500, 60_000))
+                        .executes(ctx -> updateConfig("clockSyncIntervalMs", IntegerArgumentType.getInteger(ctx, "value"))))))
+            .then(literal("timing")
+                .executes(ctx -> reportTiming()))
             .then(literal("reloadSynth")
                 .executes(ctx -> reloadSynth()))
             .then(literal("panic")
@@ -79,29 +73,39 @@ public final class PolyphonyClientTestCommands {
     }
 
     private static int updateConfig(String key, int value) {
+        boolean reload = true;
         switch (key) {
             case "maxVoices" -> Config.MAX_VOICES.set(value);
             case "ringBufferBytes" -> Config.RING_BUFFER_BYTES.set(value);
             case "pumpChunkBytes" -> Config.PUMP_CHUNK_BYTES.set(value);
-            case "adaptiveMinSubchunkBytes" -> Config.ADAPTIVE_MIN_SUBCHUNK_BYTES.set(value);
-            case "adaptiveMaxSubchunkBytes" -> Config.ADAPTIVE_MAX_SUBCHUNK_BYTES.set(value);
-            case "adaptiveTargetRenderNs" -> Config.ADAPTIVE_TARGET_RENDER_NS.set(value);
-            case "adaptiveEwmaAlphaPercent" -> Config.ADAPTIVE_EWMA_ALPHA.set(Math.max(0.01D, Math.min(1.0D, value / 100.0D)));
+            case "schedulingDelayMs" -> {
+                Config.SCHEDULING_DELAY_MS.set(value);
+                reload = false; // pure scheduler tweak; no synth rebuild needed
+            }
+            case "clockSyncIntervalMs" -> {
+                Config.CLOCK_SYNC_INTERVAL_MS.set(value);
+                reload = false;
+            }
             default -> {
                 tell("Unknown config key: " + key);
                 return 0;
             }
         }
-        Config.normalizeAdaptiveBounds();
-        reloadSynth();
-        tell("Updated " + key + " = " + value + " and reloaded synth.");
+        if (reload) reloadSynth();
+        tell("Updated " + key + " = " + value + (reload ? " and reloaded synth." : "."));
         return 1;
     }
 
-    private static int applyPreset(Config.AudioTimingPreset preset) {
-        Config.applyAudioTimingPreset(preset);
-        reloadSynth();
-        tell("Applied timing preset: " + preset.name().toLowerCase() + " and reloaded synth.");
+    private static int reportTiming() {
+        long offsetUs = PolyphonyClientClock.currentOffsetNanos() / 1_000L;
+        long bestRttUs = PolyphonyClientClock.currentBestRttNanos();
+        bestRttUs = bestRttUs < 0 ? -1 : bestRttUs / 1_000L;
+        boolean primed = PolyphonyClientClock.isPrimed();
+        int pending = PolyphonyEventScheduler.pendingCount();
+        tell(String.format(
+            "timing: primed=%s offset=%dus bestRtt=%s pending=%d lookAhead=%dms",
+            primed, offsetUs, bestRttUs < 0 ? "n/a" : (bestRttUs + "us"),
+            pending, Config.schedulingDelayMs()));
         return 1;
     }
 
@@ -125,6 +129,7 @@ public final class PolyphonyClientTestCommands {
     }
 
     private static int panic() {
+        PolyphonyEventScheduler.flushAll();
         PolyphonyClientNoteHandler.panic();
         tell("Panic triggered: stopped all active notes.");
         return 1;

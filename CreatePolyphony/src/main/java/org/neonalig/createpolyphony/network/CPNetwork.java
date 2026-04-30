@@ -21,13 +21,21 @@ import org.neonalig.createpolyphony.CreatePolyphony;
 public final class CPNetwork {
 
     /** Bumped whenever the wire format changes. Strict matching keeps us safe. */
-    public static final String VERSION = "1";
+    public static final String VERSION = "2";
 
     private CPNetwork() {}
 
     @SubscribeEvent
     public static void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar(CreatePolyphony.MODID).versioned(VERSION);
+
+        // C -> S clock-sync probe. Always registered; the response is sent immediately
+        // on the network thread so we don't block server ticks for offset estimation.
+        registrar.playToServer(
+            TimeSyncRequestPayload.TYPE,
+            TimeSyncRequestPayload.STREAM_CODEC,
+            TimeSyncRequestHandler::handle
+        );
 
         // Server -> Client: play a note on the player's held instrument.
         // The handler is registered only on the physical client, since it
@@ -46,6 +54,11 @@ public final class CPNetwork {
             registrar.playToClient(
                 PlayInstrumentNotePayload.TYPE,
                 PlayInstrumentNotePayload.STREAM_CODEC,
+                (payload, context) -> {}
+            );
+            registrar.playToClient(
+                TimeSyncResponsePayload.TYPE,
+                TimeSyncResponsePayload.STREAM_CODEC,
                 (payload, context) -> {}
             );
         }

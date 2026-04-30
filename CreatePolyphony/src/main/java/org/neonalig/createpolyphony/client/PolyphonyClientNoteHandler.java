@@ -3,9 +3,12 @@ package org.neonalig.createpolyphony.client;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
+import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.client.sound.SoundFontManager;
 import org.neonalig.createpolyphony.client.sound.PolyphonySynthSoundInstance;
+import org.neonalig.createpolyphony.client.timing.PolyphonyClientClock;
+import org.neonalig.createpolyphony.client.timing.PolyphonyEventScheduler;
 import org.neonalig.createpolyphony.network.PlayInstrumentNotePayload;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
@@ -20,43 +23,35 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Client-side handler for {@link PlayInstrumentNotePayload}.
  *
- * <h2>Architecture (post-synth refactor)</h2>
- * <p>Previously this class translated each incoming MIDI event into a
- * per-note sound effect from a resource pack. Now it forwards
- * incoming events directly to a long-lived
- * {@link PolyphonySynthesizer} which renders PCM in real time, and
- * keeps a single {@link PolyphonySynthSoundInstance} alive to pipe that
- * PCM through Minecraft's audio engine.</p>
+ * <h2>Architecture (post-timing refactor)</h2>
+ * <p>The handler is now a thin <i>scheduler front-end</i>. Each incoming event
+ * carries a {@code serverNanos} stamp captured at the upstream MIDI sequencer.
+ * We translate that to a local play-time using the offset estimated by
+ * {@link PolyphonyClientClock}, add a fixed {@linkplain Config#schedulingDelayMs() look-ahead},
+ * and hand it to {@link PolyphonyEventScheduler}, which fires the event into
+ * the synth at the precise local-clock instant. This decouples audible note
+ * timing from network jitter, server tick wobble, and render-thread spikes -
+ * so the warble that came from "play now whenever the packet happens to land"
+ * is gone.</p>
  *
- * <p>Conceptually the handler is now a thin MIDI router:</p>
+ * <p>Panic / dimension-stop events ({@code 0xF0}) and any event with
+ * {@code serverNanos == 0} bypass the scheduler so they are felt instantly.</p>
+ *
+ * <p>Conceptually:</p>
  * <pre>{@code
- *   server packet -> programChange / noteOn / noteOff -> Synth -> PCM ring -> AudioStream -> OpenAL
+ *   server packet (+serverNanos)
+ *     -> serverToLocal()                 // PolyphonyClientClock
+ *     -> + schedulingDelayMs             // configured look-ahead
+ *     -> PolyphonyEventScheduler         // park-precise dispatch thread
+ *     -> Synth.noteOn / noteOff / programChange
+ *     -> PCM ring -> AudioStream -> OpenAL
  * }</pre>
  *
- * <h2>Why one stream, not one per note</h2>
+ * <h2>Why one stream per holder, not per note</h2>
  * <p>Each {@code SoundInstance} occupies an OpenAL source. A polyphonic
- * MIDI track may have 30+ simultaneous notes; allocating that many
- * sources per player would quickly exhaust OpenAL's limited pool
- * (~256 voices total, shared across <i>all</i> Minecraft sounds). The
- * synth handles polyphony internally on a single audio stream, so we
- * use exactly one source per player regardless of how busy the track
- * is.</p>
- *
- * <h2>Program-change tracking</h2>
- * <p>Most MIDI files set the channel program once at the start and
- * leave it. The server sends the program with every NoteOn anyway (so
- * we don't need state to be authoritative on the server), and we
- * de-dupe by tracking the last program assigned to each channel,
- * issuing {@code programChange} to the synth only when it actually
- * differs.</p>
- *
- * <h2>Threading</h2>
- * <p>{@link IPayloadContext#enqueueWork(Runnable)} hands us off to the
- * client main thread, so all access to {@link #lastProgram} and the
- * lazy synth init is single-threaded. {@link PolyphonySynthesizer}'s
- * own MIDI entry points are documented as thread-safe, but going
- * through the main thread also gives us deterministic ordering of
- * NoteOn/NoteOff for the same channel.</p>
+ * MIDI track may have 30+ simultaneous notes; allocating that many sources
+ * per holder would quickly exhaust OpenAL's pool. The synth handles polyphony
+ * internally on a single audio stream.</p>
  */
 public final class PolyphonyClientNoteHandler {
 
@@ -88,20 +83,67 @@ public final class PolyphonyClientNoteHandler {
 
     /** Network entrypoint - safe to call on the network thread. */
     public static void handle(PlayInstrumentNotePayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> dispatch(payload));
+        // We deliberately do NOT use enqueueWork() here. The scheduler runs on
+        // its own daemon thread and synth event entry points are documented as
+        // thread-safe; routing on the network thread shaves the client-tick
+        // quantum (~50 ms worst case) off our scheduling latency budget.
+        try {
+            ingest(payload);
+        } catch (Throwable t) {
+            CreatePolyphony.LOGGER.error("Polyphony client ingest failed", t);
+        }
+    }
+
+    /**
+     * Translate an incoming payload into a (possibly deferred) synth event.
+     * Panics and immediate-delivery packets ({@code serverNanos == 0}) run
+     * synchronously on the calling thread; everything else is scheduled.
+     */
+    private static void ingest(PlayInstrumentNotePayload payload) {
+        // Panic short-circuit: clear any queued events too, otherwise scheduled
+        // NoteOns from an interrupted song would still fire after the panic.
+        if ((payload.command() & 0xF0) == 0xF0) {
+            debugNote("panic", payload);
+            PolyphonyEventScheduler.flushAll();
+            Minecraft.getInstance().execute(PolyphonyClientNoteHandler::panic);
+            return;
+        }
+
+        long serverNanos = payload.serverNanos();
+        if (serverNanos == 0L) {
+            // Immediate-delivery (server-initiated stop without sub-tick precision).
+            applyOnMain(payload);
+            return;
+        }
+
+        long localTargetNanos = PolyphonyClientClock.serverToLocal(serverNanos)
+            + (long) Math.max(0, Config.schedulingDelayMs()) * 1_000_000L;
+        // Defensive: if our offset is wildly off (e.g. very first packet before
+        // any sync reply), don't schedule infinitely far away or in the deep past.
+        long now = System.nanoTime();
+        long maxFuture = now + 5_000_000_000L; // 5 s
+        if (localTargetNanos < now - 500_000_000L || localTargetNanos > maxFuture) {
+            localTargetNanos = now;
+        }
+
+        PolyphonyEventScheduler.scheduleAt(localTargetNanos, () -> applyOnMain(payload));
+    }
+
+    /**
+     * Hand the event off to the Minecraft client thread so we can safely touch
+     * sound-engine state. The client-thread queue is drained at vsync rate
+     * (every render frame, &lt; 16 ms), so this adds at most a frame of jitter
+     * on top of the scheduler's nanosecond-precise wake.
+     */
+    private static void applyOnMain(PlayInstrumentNotePayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> dispatch(payload));
     }
 
     private static void dispatch(PlayInstrumentNotePayload payload) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return;
-
-        // Special admin broadcast: use command 0xF0 to mean "panic" and force local stop.
-        if ((payload.command() & 0xF0) == 0xF0) {
-            debugNote("panic", payload);
-            panic();
-            return;
-        }
 
         SoundFontManager manager = SoundFontManager.get();
         if (manager == null || manager.active() == null || manager.isLoading()) {

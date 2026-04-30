@@ -176,7 +176,7 @@ public final class PolyphonyLinkManager {
         // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
         UUID id = player.getUUID();
         PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
-            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits()));
+            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
         ACTIVE_NOTE_OWNERS.entrySet().removeIf(e -> e.getValue().isEmpty());
@@ -245,7 +245,7 @@ public final class PolyphonyLinkManager {
             ActiveNoteKey active = entry.getKey();
             UUID owner = entry.getValue();
             Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, pos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            sendNotePacket(level, pos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0, 0L);
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
@@ -282,6 +282,16 @@ public final class PolyphonyLinkManager {
      * @param data2     MIDI data byte 2 (velocity for NoteOn/Off; ignored for ProgramChange).
      */
     public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
+        dispatchNote(level, pos, status, data1, data2, System.nanoTime());
+    }
+
+    /**
+     * Variant that accepts the {@link System#nanoTime()} stamp captured at the
+     * moment the upstream sequencer emitted this event. The stamp is forwarded
+     * to clients so they can schedule the event for sample-accurate playback,
+     * decoupling audible timing from network/render jitter.
+     */
+    public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2, long eventNanos) {
         int command = status & 0xF0;
         int channel = status & 0x0F;
         LinkKey key = LinkKey.of(level, pos);
@@ -306,7 +316,7 @@ public final class PolyphonyLinkManager {
             UUID recordedOwner = consumeTrackedOwner(key, new ActiveNoteKey(channel, note));
             if (recordedOwner != null) {
                 Vec3 recordedOwnerPos = resolveHolderPosition(level, recordedOwner);
-                if (sendNotePacket(level, pos, recordedOwnerPos, recordedOwner, 0, channel, 0x80, note, velocity)) {
+                if (sendNotePacket(level, pos, recordedOwnerPos, recordedOwner, 0, channel, 0x80, note, velocity, eventNanos)) {
                     debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
                 } else {
                     debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
@@ -409,12 +419,12 @@ public final class PolyphonyLinkManager {
         }
 
         Vec3 holderPos = resolveHolderPosition(level, assigneePlayerId);
-        if (sendNotePacket(level, pos, holderPos, assigneePlayerId, program, channel, command, note, velocity)) {
+        if (sendNotePacket(level, pos, holderPos, assigneePlayerId, program, channel, command, note, velocity, eventNanos)) {
             if (!noteOff) {
                 UUID previousOwner = trackNoteOwner(key, activeNoteKey, assigneePlayerId);
                 if (previousOwner != null && !Objects.equals(previousOwner, assigneePlayerId)) {
                     Vec3 previousOwnerPos = resolveHolderPosition(level, previousOwner);
-                    sendNotePacket(level, pos, previousOwnerPos, previousOwner, 0, channel, 0x80, note, 0);
+                    sendNotePacket(level, pos, previousOwnerPos, previousOwner, 0, channel, 0x80, note, 0, 0L);
                     debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
                 }
             }
@@ -454,7 +464,8 @@ public final class PolyphonyLinkManager {
      */
     private static boolean sendNotePacket(ServerLevel trackerLevel, BlockPos trackerPos,
                                           @Nullable Vec3 holderPos, UUID holderId,
-                                          int program, int channel, int command, int note, int velocity) {
+                                          int program, int channel, int command, int note, int velocity,
+                                          long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
         int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
         double maxDist = maxDistanceBlocksInt;
@@ -476,7 +487,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
 
             // Also broadcast to nearby observers so they can hear the player positionally.
             // Mirrors the non-player holder branch: gate by each watcher's distance to the
@@ -490,7 +501,7 @@ public final class PolyphonyLinkManager {
                 PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                     program, channel, command, note, velocity,
                     false, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                    holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                    holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
             }
             return true;
         }
@@ -519,7 +530,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits(), eventNanos));
             sent = true;
         }
         return sent;
@@ -592,7 +603,7 @@ public final class PolyphonyLinkManager {
             if ((active.channel() & 0x0F) != (channel & 0x0F)) continue;
             UUID owner = entry.getValue();
             Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, trackerPos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            sendNotePacket(level, trackerPos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0, 0L);
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
@@ -621,7 +632,7 @@ public final class PolyphonyLinkManager {
                 if (!holderId.equals(entry.getValue())) continue;
                 ActiveNoteKey active = entry.getKey();
                 Vec3 holderPos = resolveHolderPosition(level, holderId);
-                sendNotePacket(level, key.pos(), holderPos, holderId, 0, active.channel(), 0x80, active.note(), 0);
+                sendNotePacket(level, key.pos(), holderPos, holderId, 0, active.channel(), 0x80, active.note(), 0, 0L);
                 byNote.remove(active);
             }
         }

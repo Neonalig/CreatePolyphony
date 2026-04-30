@@ -3,7 +3,6 @@ package org.neonalig.createpolyphony.client.sound;
 import net.minecraft.client.sounds.AudioStream;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
-import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import javax.sound.sampled.AudioFormat;
@@ -30,17 +29,20 @@ import java.util.function.DoubleSupplier;
  * The {@link ByteBuffer} we return must be:</p>
  * <ul>
  *   <li>Direct or non-direct - both work; vanilla returns non-direct.</li>
- *   <li>Positioned at 0 with limit equal to the number of bytes written.
- *       (MC calls {@code buffer.flip()} on the result internally? No -
- *       it expects {@code position=0, limit=bytesAvailable}, ready to
- *       drain. Vanilla's {@code JOrbisAudioStream} confirms this.)</li>
- *   <li>Frame-aligned - returning a half-frame yields glitches. We
- *       round all returns down to the synth's frame size.</li>
+ *   <li>Positioned at 0 with limit equal to the number of bytes written.</li>
+ *   <li>Frame-aligned - returning a half-frame yields glitches. We round
+ *       all returns down to the synth's frame size.</li>
  * </ul>
  *
  * <h2>Render model</h2>
- * <p>OpenAL asks for a chunk, we invoke the synth render block directly, and
- * return that PCM chunk immediately. No intermediate pump thread is used.</p>
+ * <p>Single fixed render call per OpenAL pull. The previous adaptive subchunk
+ * machinery (EWMA-driven slew-limited chunk-size adjustment) was deleted
+ * because it actively <i>created</i> the audible warble it was trying to
+ * mitigate: every change to the render quantum modulated when MIDI events got
+ * applied inside the synth, producing the "fast then slow then catches up"
+ * artefact users reported. Stable timing now comes from the upstream
+ * {@code PolyphonyEventScheduler}; this class just produces audio at a
+ * predictable, fixed cadence.</p>
  *
  * <h2>End-of-stream</h2>
  * <p>This stream is treated as <i>infinite</i>: we never return null or
@@ -50,10 +52,6 @@ import java.util.function.DoubleSupplier;
  */
 @OnlyIn(Dist.CLIENT)
 public final class PolyphonyAudioStream implements AudioStream {
-
-    // Fallbacks used if config bounds are temporarily invalid.
-    private static final int DEFAULT_MIN_SUBCHUNK_BYTES = 2_048;
-    private static final int DEFAULT_MAX_SUBCHUNK_BYTES = 8_192;
 
     private final PolyphonySynthesizer synth;
     private final AudioFormat format;
@@ -71,8 +69,6 @@ public final class PolyphonyAudioStream implements AudioStream {
     private final boolean gainApplicable;
 
     private volatile boolean closed = false;
-    private int adaptiveSubchunkBytes;
-    private double renderNsPerByteEwma = -1.0D;
 
     /**
      * @param synth         the live synthesizer whose ring buffer we drain. We do
@@ -88,7 +84,6 @@ public final class PolyphonyAudioStream implements AudioStream {
         this.synth = synth;
         this.format = synth.settings().toAudioFormat();
         this.scratch = new byte[Math.max(16_384, synth.settings().pumpChunkBytes() * 4)];
-        this.adaptiveSubchunkBytes = 4_096;
         this.gainSupplier = gainSupplier != null ? gainSupplier : () -> 1.0D;
         this.gainApplicable = format.getSampleSizeInBits() == 16 && !format.isBigEndian();
     }
@@ -106,7 +101,6 @@ public final class PolyphonyAudioStream implements AudioStream {
     @Override
     public ByteBuffer read(int size) throws IOException {
         int frame = synth.settings().frameSize();
-        // Honor OpenAL's request size so the streaming queue stays full.
         int boundedSize = Math.min(size, scratch.length);
         int request = Math.max(frame, boundedSize);
         request -= request % frame;
@@ -115,73 +109,20 @@ public final class PolyphonyAudioStream implements AudioStream {
         }
 
         if (!closed) {
-            int offset = 0;
-            int minSubchunkBytes = Math.max(frame, Config.adaptiveMinSubchunkBytes());
-            int maxSubchunkBytes = Math.max(minSubchunkBytes, Config.adaptiveMaxSubchunkBytes());
-            int targetRenderNs = Math.max(250_000, Config.adaptiveTargetRenderNs());
-            double ewmaAlpha = Math.max(0.01D, Math.min(1.0D, Config.adaptiveEwmaAlpha()));
-            int subchunkBytes = frameAlign(
-                Math.max(minSubchunkBytes, Math.min(adaptiveSubchunkBytes, Math.min(maxSubchunkBytes, request))),
-                frame);
-            if (subchunkBytes <= 0) {
-                subchunkBytes = frame;
-            }
-
-            while (offset < request) {
-                int remaining = request - offset;
-                int chunk = Math.min(subchunkBytes, remaining);
-                chunk = frameAlign(chunk, frame);
-                if (chunk <= 0) {
-                    chunk = frame;
-                }
-
-                long t0 = System.nanoTime();
-                int read = synth.renderPcm(scratch, offset, chunk);
-                long elapsedNs = System.nanoTime() - t0;
-
-                // On underrun, pad this chunk with silence so OpenAL always sees valid PCM.
-                if (read < chunk) {
-                    java.util.Arrays.fill(scratch, offset + Math.max(0, read), offset + chunk, (byte) 0);
-                }
-
-                int bytesForCost = Math.max(frame, chunk);
-                double sampleNsPerByte = (double) elapsedNs / (double) bytesForCost;
-                if (renderNsPerByteEwma < 0D) {
-                    renderNsPerByteEwma = sampleNsPerByte;
-                } else {
-                    renderNsPerByteEwma += (sampleNsPerByte - renderNsPerByteEwma) * ewmaAlpha;
-                }
-
-                offset += chunk;
+            int produced = synth.renderPcm(scratch, 0, request);
+            if (produced < request) {
+                // On underrun, pad the tail with silence so OpenAL always sees valid PCM.
+                java.util.Arrays.fill(scratch, Math.max(0, produced), request, (byte) 0);
             }
 
             // Apply post-render gain so the result can exceed MC's downstream
-            // [0..1] volume clamp without losing dynamic range. Done once per
-            // read() rather than per-subchunk for cache locality.
+            // [0..1] volume clamp without losing dynamic range.
             if (gainApplicable) {
                 double gain = gainSupplier.getAsDouble();
                 if (Double.isFinite(gain) && Math.abs(gain - 1.0D) > 1.0e-3D && gain >= 0.0D) {
                     applyGain16LE(scratch, 0, request, gain);
                 }
             }
-
-            double nsPerByte = Math.max(1.0D, renderNsPerByteEwma);
-            int targetSubchunk = (int) Math.round(targetRenderNs / nsPerByte);
-            targetSubchunk = frameAlign(Math.max(minSubchunkBytes, Math.min(maxSubchunkBytes, targetSubchunk)), frame);
-            if (targetSubchunk <= 0) {
-                targetSubchunk = frame;
-            }
-
-            // Slew-limit chunk-size updates to avoid audible timing modulation.
-            int blended = subchunkBytes + ((targetSubchunk - subchunkBytes) / 4);
-            int clamped = Math.max(minSubchunkBytes, Math.min(maxSubchunkBytes, frameAlign(blended, frame)));
-            if (clamped <= 0) {
-                clamped = frameAlign(DEFAULT_MIN_SUBCHUNK_BYTES, frame);
-            }
-            if (clamped <= 0) {
-                clamped = frameAlign(DEFAULT_MAX_SUBCHUNK_BYTES, frame);
-            }
-            adaptiveSubchunkBytes = Math.max(frame, clamped);
         } else {
             java.util.Arrays.fill(scratch, 0, request, (byte) 0);
         }
@@ -191,10 +132,6 @@ public final class PolyphonyAudioStream implements AudioStream {
         out.put(scratch, 0, request);
         out.flip();
         return out;
-    }
-
-    private static int frameAlign(int bytes, int frame) {
-        return bytes - (bytes % Math.max(1, frame));
     }
 
     /**

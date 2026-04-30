@@ -30,6 +30,16 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  * is the holder themselves; the stream stays anchored to the listener for
  * an "in your hands" feel, and the src fields are ignored.</p>
  *
+ * <h2>Timing model</h2>
+ * <p>{@code serverNanos} is {@link System#nanoTime()} captured on the server
+ * at the moment the upstream MIDI sequencer emitted this event (i.e. inside
+ * the tracker-bar mixin, before any routing/serialization work). The client
+ * converts it to a local-clock target using its synced offset, then schedules
+ * the event for delivery to the synth at that exact local time plus a small
+ * fixed look-ahead. This decouples audible note timing from network jitter
+ * and tick-quantization wobble. {@code 0L} means "deliver immediately"
+ * (used for panic and tracker-stop force-offs).</p>
+ *
  * @param program   General-MIDI program number, 0-127.
  * @param channel   MIDI channel (0-15).
  * @param command   MIDI command nibble: 0x80 = NoteOff, 0x90 = NoteOn, 0xF0 = Panic.
@@ -43,6 +53,8 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  * @param maxDistanceBlocks  Server-computed audible radius in blocks (derived from simulation distance).
  * @param sourceMost Most-significant bits of the holder/source UUID.
  * @param sourceLeast Least-significant bits of the holder/source UUID.
+ * @param serverNanos Server {@link System#nanoTime()} stamp at upstream-MIDI-emit time;
+ *                   {@code 0L} = deliver immediately (panic / stop).
  */
 public record PlayInstrumentNotePayload(
     int program,
@@ -56,14 +68,15 @@ public record PlayInstrumentNotePayload(
     float srcZ,
     int maxDistanceBlocks,
     long sourceMost,
-    long sourceLeast
+    long sourceLeast,
+    long serverNanos
 ) implements CustomPacketPayload {
 
     public static final Type<PlayInstrumentNotePayload> TYPE = new Type<>(
         ResourceLocation.fromNamespaceAndPath(CreatePolyphony.MODID, "play_instrument_note")
     );
 
-    /** Manual StreamCodec: 5 MIDI bytes + 1 boolean + 3 floats + 1 int + 2 longs. */
+    /** Manual StreamCodec: 5 MIDI bytes + 1 boolean + 3 floats + 1 int + 3 longs. */
     public static final StreamCodec<RegistryFriendlyByteBuf, PlayInstrumentNotePayload> STREAM_CODEC =
         StreamCodec.of(
             (buf, p) -> {
@@ -79,6 +92,7 @@ public record PlayInstrumentNotePayload(
                 buf.writeVarInt(p.maxDistanceBlocks());
                 buf.writeLong(p.sourceMost());
                 buf.writeLong(p.sourceLeast());
+                buf.writeLong(p.serverNanos());
             },
             buf -> new PlayInstrumentNotePayload(
                 Byte.toUnsignedInt(buf.readByte()) & 0x7F,
@@ -91,6 +105,7 @@ public record PlayInstrumentNotePayload(
                 buf.readFloat(),
                 buf.readFloat(),
                 buf.readVarInt(),
+                buf.readLong(),
                 buf.readLong(),
                 buf.readLong()
             )
