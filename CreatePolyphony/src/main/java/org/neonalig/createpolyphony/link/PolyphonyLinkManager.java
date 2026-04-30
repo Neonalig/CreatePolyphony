@@ -748,7 +748,18 @@ public final class PolyphonyLinkManager {
         for (Map.Entry<LinkKey, HeldInstruments> entry : desired.entrySet()) {
             LinkKey key = entry.getKey();
             HeldInstruments held = entry.getValue();
-            if (current != null && held.equals(current.get(key))) continue;
+            HeldInstruments prior = current != null ? current.get(key) : null;
+            if (held.equals(prior)) continue;
+
+            // Held-instrument state changed for an already-linked holder (e.g. main<->off
+            // swap, instrument item replaced, family changed). The per-(holder, hand)
+            // sourceBusId derives from the hand slot, so the new participant lands on a
+            // different client bus than the one currently holding any in-flight notes.
+            // Force-stop everything this holder still owns on this link before
+            // re-registering, so the stale bus doesn't keep ringing the old timbre.
+            if (prior != null) {
+                forceStopNotesOwnedBy(levelHint, key, holderId);
+            }
 
             PolyphonyLink link = LINKS.get(key);
             if (link == null) {
@@ -794,11 +805,14 @@ public final class PolyphonyLinkManager {
         for (Map.Entry<UUID, TransientHolderState> entry : Map.copyOf(TRANSIENT_HOLDER_EXPIRY).entrySet()) {
             if (entry.getValue().expiryTick() > now) continue;
             UUID holderId = entry.getKey();
-            TRANSIENT_HOLDER_EXPIRY.remove(holderId);
-            // Soft-expire: remove channel assignment but do NOT force-stop notes.
-            // Any in-flight notes are tracked in ACTIVE_NOTE_OWNERS; their NoteOffs
-            // will arrive from the MIDI sequencer and route correctly via consumeTrackedOwner.
-            removeHolderAssignmentOnly(holderId);
+            TransientHolderState state = TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+            // Hard-expire: the deployer (or other transient holder) has stopped activating
+            // / is no longer holding a linked instrument. Per spec, any swap of a holder's
+            // instrument state must immediately stop everything it was playing - waiting for
+            // a possibly-distant sequencer NoteOff would leave audible notes ringing well
+            // past the moment the holder ceased to participate.
+            ServerLevel removeLevel = state != null ? state.level() : level;
+            removeHolder(holderId, removeLevel);
         }
     }
 
@@ -810,28 +824,6 @@ public final class PolyphonyLinkManager {
             levelPath.equals(entry.getKey().levelPath()) && entry.getValue() <= now);
     }
 
-    /**
-     * Removes a holder's channel-assignment participation without sending NoteOff packets.
-     * Used for TTL-based soft expiry of automation (deployer) holders.
-     * Contrast with {@link #removeHolder} which also force-stops all tracked notes.
-     */
-    private static void removeHolderAssignmentOnly(UUID holderId) {
-        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(holderId);
-        if (current == null) return;
-        for (LinkKey key : current.keySet()) {
-            PolyphonyLink link = LINKS.get(key);
-            if (link == null) continue;
-            link.removePlayer(holderId);
-            if (link.isEmpty()) {
-                LINKS.remove(key);
-                // Intentionally keep ACTIVE_NOTE_OWNERS entries alive: NoteOffs that
-                // arrive after the link goes empty still need to route to their owner
-                // (via consumeTrackedOwner in dispatchNote) to stop client synth voices.
-                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
-                TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
-            }
-        }
-    }
 
     private static boolean isPostStopNoteOnSuppressed(ServerLevel level, LinkKey key, int command, int velocity) {
         if ((command & 0xF0) != 0x90 || (velocity & 0x7F) == 0) return false;
