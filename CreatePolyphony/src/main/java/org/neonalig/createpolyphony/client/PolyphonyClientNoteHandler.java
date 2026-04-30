@@ -193,12 +193,19 @@ public final class PolyphonyClientNoteHandler {
                 // thread (or fires off the scheduler on the main thread later) is
                 // already filtered against the watermark.
                 recordStopWatermark(busId, payload.serverNanos());
-                Minecraft.getInstance().execute(() -> stopBus(busId));
+                Minecraft.getInstance().execute(() -> releaseBus(busId));
                 return;
             }
             debugNote("panic", payload);
             PolyphonyEventScheduler.flushAll();
-            Minecraft.getInstance().execute(PolyphonyClientNoteHandler::panic);
+            // Graceful global release: send NoteOff to every active voice on
+            // every bus so the SF2 release envelope plays out instead of
+            // hard-cutting. The buses themselves are kept alive (see
+            // releaseAll()) so any in-flight release tail finishes audibly.
+            // Hard cleanup of synths/streams stays reserved for lifecycle
+            // boundaries (logout, dimension change handled by PlayerClone,
+            // soundfont swap) where the audio session itself is going away.
+            Minecraft.getInstance().execute(PolyphonyClientNoteHandler::releaseAll);
             return;
         }
 
@@ -362,9 +369,16 @@ public final class PolyphonyClientNoteHandler {
     }
 
     /**
-     * Stop every active note and retire the streaming sound. Called on
-     * disconnect / world unload to make sure we don't leak voices or audio
-     * sources between worlds.
+     * Hard-stop for all local synth output. Used by lifecycle boundaries
+     * (logout, dimension/respawn clone, soundfont swap) where the audio
+     * session itself is going away and we want to free the OpenAL sources
+     * and synth state immediately rather than render release tails into a
+     * world that no longer exists.
+     *
+     * <p>Server-initiated panics ({@code 0xF0+note=0}) and per-bus stops
+     * ({@code 0xF0+note=1}) take the graceful {@link #releaseAll()} /
+     * {@link #releaseBus} path instead so the SF2 release envelope is
+     * audible instead of being clipped abruptly.</p>
      */
     public static void stopAll() {
         Arrays.fill(lastProgram, -1);
@@ -383,6 +397,29 @@ public final class PolyphonyClientNoteHandler {
         // watermarks we kept around, which would deadlock all subsequent buses
         // into "stale" territory. Drop them so the new session starts clean.
         STOP_WATERMARKS.clear();
+    }
+
+    /**
+     * Graceful counterpart to {@link #stopAll()}: queues an All-Notes-Off on
+     * every active bus so currently-sounding voices enter their release phase
+     * and fade out via the SF2 envelope, instead of being hard-cut. The buses
+     * (and their OpenAL streams) are intentionally kept in
+     * {@link #SOURCE_BUSES} so the synth keeps rendering until the tails decay
+     * to zero voices; the routine 12 s idle prune in {@link #pruneIdleBuses}
+     * (or eviction under bus-count pressure) recycles them later.
+     *
+     * <p>Used for the {@code 0xF0+note=0} server panic, which now means
+     * "release everything" rather than "rip everything off mid-attack".</p>
+     */
+    public static void releaseAll() {
+        for (SourceBus bus : SOURCE_BUSES.values()) {
+            bus.releaseGracefully();
+        }
+        // lastProgram[] tracks the channel-program mapping the next NoteOn
+        // would compare against. Clearing it would force a redundant
+        // ProgramChange on the very next note, but graceful release shouldn't
+        // alter program state - leave it alone, the per-bus lastProgram[] is
+        // what actually drives dispatch.
     }
 
     private static void pruneIdleBuses(int nowTick) {
@@ -593,23 +630,28 @@ public final class PolyphonyClientNoteHandler {
     }
 
     /**
-     * Targeted stop for a single source bus. Used when the server signals that
-     * a specific holder's hand has lost its instrument; we close that bus's
-     * voices and stream so the synth stops producing audio for it
-     * immediately. The bus entry itself is removed (rather than just released)
-     * so a future re-acquisition gets a fresh synth state and doesn't inherit
-     * stale program/voice context.
+     * Graceful per-bus stop: queues an All-Notes-Off on the matching bus's
+     * synth so its currently-sounding voices fade through their release
+     * envelope instead of being clipped. The bus and its stream stay alive in
+     * {@link #SOURCE_BUSES} until the routine idle prune retires them, which
+     * means the SF2 release tail is audible after the holder unequips
+     * - and a quick re-equip lands on the same warm bus rather than triggering
+     * a fresh prewarmed-synth borrow.
+     *
+     * <p>The {@link #STOP_WATERMARKS} entry recorded in {@link #ingest} keeps
+     * any in-flight stale NoteOn from the same bus from re-triggering during
+     * the release phase.</p>
      */
-    public static void stopBus(UUID sourceId) {
-        SourceBus bus = SOURCE_BUSES.remove(sourceId);
+    public static void releaseBus(UUID sourceId) {
+        SourceBus bus = SOURCE_BUSES.get(sourceId);
         if (bus == null) {
-            // Nothing to do - the client never had a bus with this id, or it was
-            // already pruned. The panic packet is harmless in that case.
+            // Nothing to do - the client never had a bus with this id, or it
+            // was already pruned. The release packet is harmless in that case.
             return;
         }
-        bus.closeFully();
+        bus.releaseGracefully();
         if (CreatePolyphony.LOGGER.isDebugEnabled()) {
-            CreatePolyphony.LOGGER.debug("client:bus:stop:{}", sourceId);
+            CreatePolyphony.LOGGER.debug("client:bus:release:{}", sourceId);
         }
     }
 
@@ -679,6 +721,23 @@ public final class PolyphonyClientNoteHandler {
                 stream = null;
             }
             return synth;
+        }
+
+        /**
+         * Queue an All-Notes-Off on the synth so currently-sounding voices
+         * enter their release phase and fade via the SF2 envelope. Crucially
+         * this leaves the synth and its OpenAL stream alive: the synth keeps
+         * rendering until {@code activeVoiceCount() == 0}, at which point
+         * {@code renderInto} naturally produces silence. Routine idle pruning
+         * recycles the bus afterwards.
+         *
+         * <p>{@code lastProgram[]} is intentionally NOT cleared - the user
+         * may re-equip onto the same deterministic bus id, and the cached
+         * program state lets us skip a redundant ProgramChange on the next
+         * NoteOn.</p>
+         */
+        private void releaseGracefully() {
+            try { synth.allNotesOff(); } catch (Throwable ignored) { }
         }
 
         private void closeFully() {
