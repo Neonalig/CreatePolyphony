@@ -18,6 +18,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -65,10 +67,52 @@ public final class PolyphonyClientNoteHandler {
     private static final int BUS_IDLE_TIMEOUT_TICKS = 20 * 12;
     private static final int MAX_SOURCE_BUSES = 24;
     private static final int MAX_IDLE_SYNTH_POOL = 8;
+    /**
+     * Target size for the proactively-prewarmed synth pool. The first time a
+     * client receives a NoteOn for a holder it has no {@link SourceBus} for,
+     * we have to construct a {@link PolyphonySynthesizer} (which loads and
+     * parses the active SoundFont). On a non-trivial SF2 (tens of MB, several
+     * hundred presets) that is a hundreds-of-milliseconds blocking step, and
+     * doing it from {@link #dispatch} - which runs on the Minecraft client
+     * thread - manifests as a half-second hitch right when the player equips
+     * their instrument mid-song. We keep this many warm synths ready in the
+     * idle pool at all times so {@link #createBus} can pop one in O(1).
+     */
+    private static final int PREWARM_TARGET = 2;
+
+    /**
+     * Single dedicated background thread for SF2-loading prewarms. A daemon
+     * thread so it can never keep the JVM alive past shutdown; serial because
+     * concurrent SF2 parses just thrash the disk and contend over MeltySynth's
+     * internal buffers without producing voices any faster.
+     */
+    private static final ExecutorService PREWARM_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Polyphony-SynthPrewarm");
+        t.setDaemon(true);
+        // Below normal so SF2 parsing yields to render/network/audio threads.
+        t.setPriority(Thread.NORM_PRIORITY - 1);
+        return t;
+    });
+    /** Synchronisation lock for {@link #IDLE_SYNTH_POOL}, now touched from the prewarm thread too. */
+    private static final Object IDLE_POOL_LOCK = new Object();
+    /** Coalescing flag so we don't pile up redundant prewarm tasks on the executor. */
+    private static final AtomicInteger PENDING_PREWARM_REQUESTS = new AtomicInteger(0);
 
     /** One independent synth/stream per holder source UUID for positional separation. */
     private static final Map<UUID, SourceBus> SOURCE_BUSES = new HashMap<>();
-    /** Prewarmed loaded synths recycled from idle buses to avoid SF2 reload hitch on resume. */
+    /**
+     * Prewarmed loaded synths. Two producers feed it:
+     * <ol>
+     *   <li>{@link #recycleIdleBus} when a client-side bus times out without
+     *       further packets.</li>
+     *   <li>The background {@link #PREWARM_EXECUTOR} which proactively loads
+     *       fresh synths from the active soundfont up to {@link #PREWARM_TARGET}.</li>
+     * </ol>
+     * Consumed by {@link #borrowPrewarmedSynth} on the client thread when a new
+     * {@link SourceBus} is needed (i.e. first NoteOn for a fresh holder/hand).
+     * All access goes through {@link #IDLE_POOL_LOCK} now that more than one
+     * thread can touch it.
+     */
     private static final ArrayDeque<PooledSynth> IDLE_SYNTH_POOL = new ArrayDeque<>();
     private static int lastSoundfontGeneration = Integer.MIN_VALUE;
 
@@ -275,8 +319,10 @@ public final class PolyphonyClientNoteHandler {
             bus.closeFully();
         }
         SOURCE_BUSES.clear();
-        while (!IDLE_SYNTH_POOL.isEmpty()) {
-            closeQuietly(IDLE_SYNTH_POOL.removeFirst().synth());
+        synchronized (IDLE_POOL_LOCK) {
+            while (!IDLE_SYNTH_POOL.isEmpty()) {
+                closeQuietly(IDLE_SYNTH_POOL.removeFirst().synth());
+            }
         }
     }
 
@@ -308,11 +354,13 @@ public final class PolyphonyClientNoteHandler {
     private static void recycleIdleBus(SourceBus bus) {
         PolyphonySynthesizer synth = bus.detachForReuse();
         if (synth == null) return;
-        if (IDLE_SYNTH_POOL.size() >= MAX_IDLE_SYNTH_POOL) {
-            closeQuietly(synth);
-            return;
+        synchronized (IDLE_POOL_LOCK) {
+            if (IDLE_SYNTH_POOL.size() >= MAX_IDLE_SYNTH_POOL) {
+                closeQuietly(synth);
+                return;
+            }
+            IDLE_SYNTH_POOL.addLast(new PooledSynth(lastSoundfontGeneration, synth));
         }
-        IDLE_SYNTH_POOL.addLast(new PooledSynth(lastSoundfontGeneration, synth));
         if (CreatePolyphony.LOGGER.isDebugEnabled()) {
             CreatePolyphony.LOGGER.debug("client:bus:recycle:{}", bus.sourceId);
         }
@@ -321,22 +369,110 @@ public final class PolyphonyClientNoteHandler {
     private static SourceBus createBus(SoundFontManager manager, UUID sourceId) {
         PolyphonySynthesizer synth = borrowPrewarmedSynth(lastSoundfontGeneration);
         if (synth == null) {
+            // Pool was empty - this is the cold-start case (first instrument
+            // equipped this session, before the prewarmer finished its first
+            // load). Pay the SF2 parse on the client thread once; subsequent
+            // creates will draw from the prewarmed pool.
             synth = manager.createIsolatedSynth();
         }
+        // Refill so the next holder/hand to come online doesn't re-pay the cost.
+        requestPrewarm();
         if (synth == null) return null;
         return new SourceBus(sourceId, synth);
     }
 
     private static PolyphonySynthesizer borrowPrewarmedSynth(int expectedGeneration) {
-        while (!IDLE_SYNTH_POOL.isEmpty()) {
-            PooledSynth pooled = IDLE_SYNTH_POOL.removeLast();
-            if (pooled.generation() != expectedGeneration) {
-                closeQuietly(pooled.synth());
-                continue;
+        synchronized (IDLE_POOL_LOCK) {
+            while (!IDLE_SYNTH_POOL.isEmpty()) {
+                PooledSynth pooled = IDLE_SYNTH_POOL.removeLast();
+                if (pooled.generation() != expectedGeneration) {
+                    closeQuietly(pooled.synth());
+                    continue;
+                }
+                return pooled.synth();
             }
-            return pooled.synth();
+            return null;
         }
-        return null;
+    }
+
+    /**
+     * Schedule a background prewarm so the idle pool stays at
+     * {@link #PREWARM_TARGET}. Coalesces redundant requests via
+     * {@link #PENDING_PREWARM_REQUESTS}: any request that arrives while another
+     * is already queued is satisfied by the existing task.
+     *
+     * <p>Public so {@link org.neonalig.createpolyphony.client.sound.SoundFontManager}
+     * can call it whenever a soundfont finishes (re)loading - that is exactly
+     * the moment we know the previous pool generation became invalid and we
+     * want fresh synths ready before the player triggers the first NoteOn.</p>
+     */
+    public static void requestPrewarm() {
+        // If a prewarm is already queued, it will observe the current pool size
+        // when it runs and top it up - so we don't need to schedule another.
+        if (PENDING_PREWARM_REQUESTS.getAndIncrement() > 0) return;
+        try {
+            PREWARM_EXECUTOR.execute(PolyphonyClientNoteHandler::runPrewarmTask);
+        } catch (Throwable t) {
+            // Executor rejected (e.g. JVM shutdown in progress): clear the flag
+            // so a future request can try again. Don't propagate - prewarm is a
+            // pure performance optimisation; the cold-start fallback in
+            // createBus() will still produce audio.
+            PENDING_PREWARM_REQUESTS.set(0);
+            CreatePolyphony.LOGGER.debug("Prewarm executor rejected task", t);
+        }
+    }
+
+    private static void runPrewarmTask() {
+        // Drain the request counter; this single task handles all coalesced
+        // requests by topping the pool up to PREWARM_TARGET.
+        PENDING_PREWARM_REQUESTS.set(0);
+
+        SoundFontManager manager = SoundFontManager.get();
+        if (manager == null || manager.isLoading() || manager.active() == null) return;
+
+        int activeGeneration = manager.soundfontGeneration();
+
+        while (true) {
+            // Re-check pool size each iteration: a concurrent borrow would have
+            // dropped us below the target and we should refill again.
+            int currentSize;
+            synchronized (IDLE_POOL_LOCK) {
+                // Drop any stale-generation entries while we have the lock so
+                // we never count them toward the target.
+                IDLE_SYNTH_POOL.removeIf(p -> {
+                    if (p.generation() == activeGeneration) return false;
+                    closeQuietly(p.synth());
+                    return true;
+                });
+                currentSize = IDLE_SYNTH_POOL.size();
+            }
+            if (currentSize >= PREWARM_TARGET) return;
+
+            // Soundfont may have changed underneath us between iterations; bail
+            // immediately and let the next listener-fired requestPrewarm pick up
+            // the new generation rather than waste cycles on the old one.
+            if (manager.soundfontGeneration() != activeGeneration || manager.isLoading()) return;
+
+            PolyphonySynthesizer synth = manager.createIsolatedSynth();
+            if (synth == null) {
+                // Couldn't load (e.g. soundfont was just deactivated). Stop
+                // looping; the next requestPrewarm will retry once a sound is
+                // available again.
+                return;
+            }
+
+            synchronized (IDLE_POOL_LOCK) {
+                if (manager.soundfontGeneration() != activeGeneration
+                    || IDLE_SYNTH_POOL.size() >= MAX_IDLE_SYNTH_POOL) {
+                    // Generation flipped while we were loading, or another
+                    // producer raced us past the cap. Discard rather than keep
+                    // a synth that will only be thrown away on next borrow.
+                    closeQuietly(synth);
+                    return;
+                }
+                IDLE_SYNTH_POOL.addLast(new PooledSynth(activeGeneration, synth));
+            }
+        }
     }
 
     private static void closeQuietly(PolyphonySynthesizer synth) {

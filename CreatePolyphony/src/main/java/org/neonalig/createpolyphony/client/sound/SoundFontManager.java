@@ -170,6 +170,18 @@ public final class SoundFontManager {
 
             // Wire the note handler to query us for the synth.
             PolyphonyClientNoteHandler.setSynthSupplier(mgr::activeSynth);
+            // Whenever the active soundfont (re)loads, kick the note handler's
+            // background prewarmer so a small pool of ready-to-go synths is
+            // standing by before the next first-NoteOn arrives. Without this,
+            // equipping a linked instrument mid-song forces a synchronous SF2
+            // parse on the client thread the first time we have to build a
+            // SourceBus for that holder, which manifests as a several-hundred
+            // -ms hitch right when playback starts.
+            mgr.addListener(m -> {
+                if (!m.isLoading() && m.active() != null) {
+                    PolyphonyClientNoteHandler.requestPrewarm();
+                }
+            });
 
             // Restore last selection, if any.
             mgr.loadSelectionFromDisk();
