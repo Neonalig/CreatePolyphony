@@ -42,7 +42,20 @@ import org.neonalig.createpolyphony.CreatePolyphony;
  *
  * @param program   General-MIDI program number, 0-127.
  * @param channel   MIDI channel (0-15).
- * @param command   MIDI command nibble: 0x80 = NoteOff, 0x90 = NoteOn, 0xF0 = Panic.
+ * @param command   MIDI command nibble: 0x80 = NoteOff, 0x90 = NoteOn,
+ *                  0xF0 = Panic. When {@code command == 0xF0} the {@code note}
+ *                  field is overloaded as a sub-command:
+ *                  <ul>
+ *                    <li>{@code note == 0}: global panic - stop every active
+ *                        client {@code SourceBus} (used on dimension change /
+ *                        admin force-stop).</li>
+ *                    <li>{@code note == 1}: per-bus stop - silence only the
+ *                        {@code SourceBus} identified by {@code (sourceMost,
+ *                        sourceLeast)} (used when an instrument leaves a
+ *                        holder's hand and any voices ringing on that bus must
+ *                        cut off immediately, even if note tracking missed an
+ *                        owner).</li>
+ *                  </ul>
  * @param note      MIDI note number, 0-127.
  * @param velocity  MIDI velocity, 0-127.
  * @param selfPlay  {@code true} when the receiving player is the holder themselves

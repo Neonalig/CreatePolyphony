@@ -103,6 +103,21 @@ public final class PolyphonyClientNoteHandler {
         // Panic short-circuit: clear any queued events too, otherwise scheduled
         // NoteOns from an interrupted song would still fire after the panic.
         if ((payload.command() & 0xF0) == 0xF0) {
+            // Sub-command lives in the note field (cf. PlayInstrumentNotePayload):
+            //   note == 1 -> per-bus stop: silence ONLY the SourceBus identified
+            //                by (sourceMost, sourceLeast). Used when a holder loses
+            //                their instrument (hand swap, drop, deployer extraction,
+            //                etc.) and any voices ringing on that bus must cut off
+            //                immediately, even if the server's per-(channel, note)
+            //                NoteOff bookkeeping missed an owner.
+            //   note == 0 (default) -> global panic: stopAll().
+            int sub = payload.note() & 0x7F;
+            if (sub == 1) {
+                debugNote("panic-bus", payload);
+                UUID busId = new UUID(payload.sourceMost(), payload.sourceLeast());
+                Minecraft.getInstance().execute(() -> stopBus(busId));
+                return;
+            }
             debugNote("panic", payload);
             PolyphonyEventScheduler.flushAll();
             Minecraft.getInstance().execute(PolyphonyClientNoteHandler::panic);
@@ -332,6 +347,27 @@ public final class PolyphonyClientNoteHandler {
     /** Emergency hard-stop for all local synth output. */
     public static void panic() {
         stopAll();
+    }
+
+    /**
+     * Targeted stop for a single source bus. Used when the server signals that
+     * a specific holder's hand has lost its instrument; we close that bus's
+     * voices and stream so the synth stops producing audio for it
+     * immediately. The bus entry itself is removed (rather than just released)
+     * so a future re-acquisition gets a fresh synth state and doesn't inherit
+     * stale program/voice context.
+     */
+    public static void stopBus(UUID sourceId) {
+        SourceBus bus = SOURCE_BUSES.remove(sourceId);
+        if (bus == null) {
+            // Nothing to do - the client never had a bus with this id, or it was
+            // already pruned. The panic packet is harmless in that case.
+            return;
+        }
+        bus.closeFully();
+        if (CreatePolyphony.LOGGER.isDebugEnabled()) {
+            CreatePolyphony.LOGGER.debug("client:bus:stop:{}", sourceId);
+        }
     }
 
     // ---- Synth lookup ------------------------------------------------------------------------

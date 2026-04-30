@@ -699,24 +699,67 @@ public final class PolyphonyLinkManager {
 
     private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID realHolderId) {
         Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
-        if (byNote == null || byNote.isEmpty()) return;
-
-        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
-            ActiveNoteKey active = entry.getKey();
-            List<TrackedOwner> owners = entry.getValue();
-            for (TrackedOwner owner : List.copyOf(owners)) {
-                if (!realHolderId.equals(owner.realHolderId())) continue;
-                if (level != null) {
-                    Vec3 holderPos = resolveHolderPosition(level, realHolderId);
-                    sendNotePacket(level, key.pos(), holderPos, realHolderId, owner.sourceBusId(),
-                        0, active.channel(), 0x80, active.note(), 0, 0L);
+        if (byNote != null && !byNote.isEmpty()) {
+            for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
+                ActiveNoteKey active = entry.getKey();
+                List<TrackedOwner> owners = entry.getValue();
+                for (TrackedOwner owner : List.copyOf(owners)) {
+                    if (!realHolderId.equals(owner.realHolderId())) continue;
+                    if (level != null) {
+                        Vec3 holderPos = resolveHolderPosition(level, realHolderId);
+                        sendNotePacket(level, key.pos(), holderPos, realHolderId, owner.sourceBusId(),
+                            0, active.channel(), 0x80, active.note(), 0, 0L);
+                    }
+                    owners.remove(owner);
                 }
-                owners.remove(owner);
+                if (owners.isEmpty()) byNote.remove(active);
             }
-            if (owners.isEmpty()) byNote.remove(active);
+            if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
         }
 
-        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
+        // Belt-and-suspenders: even if note tracking missed an owner (e.g. due to a
+        // dispatch that took a different code path, a desync between LinkKey
+        // identities, or a client bus that received an early NoteOn from before
+        // the server registered the owner), explicitly tell the client to silence
+        // every voice on this holder's per-hand source buses. The client treats
+        // command 0xF0 with note=1 as "stop the SourceBus identified by
+        // (sourceMost, sourceLeast)" - so any ringing voice on either hand is
+        // cut immediately. Without this, voices could persist until the bus's
+        // 12s idle timeout (which itself only fires off the back of an unrelated
+        // incoming packet), producing the "indefinitely held note" symptom.
+        if (level != null) {
+            sendBusStopPacket(level, key.pos(), realHolderId, PolyphonyLink.mainHandBusId(realHolderId));
+            sendBusStopPacket(level, key.pos(), realHolderId, PolyphonyLink.offHandBusId(realHolderId));
+        }
+    }
+
+    /**
+     * Broadcasts a per-bus stop sentinel ({@code command=0xF0, note=1}) to the
+     * holder (selfPlay) and every player in {@code level} so all clients with
+     * a matching {@code SourceBus} silence it at once. The packet is dispatched
+     * with {@code serverNanos=0} so the client bypasses the scheduler and
+     * applies it immediately.
+     */
+    private static void sendBusStopPacket(ServerLevel level, BlockPos trackerPos, UUID realHolderId, UUID sourceBusId) {
+        int maxDistanceBlocksInt = simulationDistanceBlocks(level.getServer());
+        PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(
+            0, 0, 0xF0, 1, 0,
+            false, (float) trackerPos.getX(), (float) trackerPos.getY(), (float) trackerPos.getZ(),
+            maxDistanceBlocksInt,
+            sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), 0L);
+
+        // Direct send to the holder if they're an online player so they hear their
+        // own bus stop instantly, regardless of where they wandered.
+        ServerPlayer holderPlayer = level.getServer().getPlayerList().getPlayer(realHolderId);
+        if (holderPlayer != null) {
+            PacketDistributor.sendToPlayer(holderPlayer, payload);
+        }
+        // Broadcast to everyone in the level: any of them may hold a positional
+        // bus for this holder/hand from prior NoteOns and need to silence it too.
+        for (ServerPlayer watcher : level.players()) {
+            if (watcher == holderPlayer) continue;
+            PacketDistributor.sendToPlayer(watcher, payload);
+        }
     }
 
     @Nullable

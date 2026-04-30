@@ -273,6 +273,22 @@ public final class PolyphonyLink {
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 
+    /**
+     * Public, deterministic main-hand bus id for a holder. Mirrors the internal
+     * derivation used to populate {@link ChannelAssignee#sourceBusId()} for the
+     * main-hand participant, so downstream callers (e.g. the link manager when
+     * issuing a per-bus stop packet) can address the exact same client
+     * {@code SourceBus} without having to look up an in-flight note first.
+     */
+    public static UUID mainHandBusId(UUID realHolderId) {
+        return deriveSourceBusId(realHolderId, HandSlot.MAIN_HAND);
+    }
+
+    /** Public, deterministic off-hand bus id for a holder. Counterpart of {@link #mainHandBusId(UUID)}. */
+    public static UUID offHandBusId(UUID realHolderId) {
+        return deriveSourceBusId(realHolderId, HandSlot.OFF_HAND);
+    }
+
     private int channelMaskForItem(@Nullable Item instrumentItem) {
         if (instrumentItem == null) return 0;
         int mask = 0;
