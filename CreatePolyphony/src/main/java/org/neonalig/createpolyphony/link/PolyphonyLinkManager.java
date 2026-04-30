@@ -27,11 +27,12 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,12 +79,44 @@ public final class PolyphonyLinkManager {
 
     /** Active held-link participation: player UUID -> links currently in hand/off-hand. */
     private static final Map<UUID, Map<LinkKey, HeldInstruments>> ACTIVE_HAND_LINKS = new HashMap<>();
-    /** Active note ownership per link: (channel,note) -> player UUID currently expected to receive NoteOff. */
-    private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
+    /**
+     * Active note ownership per link: (channel, note) -&gt; every per-assignee
+     * client bus currently expecting a matching NoteOff. With each linked
+     * instrument routed to its own client bus, a single (channel, note) can
+     * have multiple owners (e.g. main hand + off hand both playing the same
+     * note simultaneously) and each one needs its own NoteOff packet to free
+     * the corresponding voice.
+     */
+    private static final Map<LinkKey, Map<ActiveNoteKey, List<TrackedOwner>>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
     /** Per-tracker guard window that drops delayed NoteOn events immediately after transport stop. */
     private static final Map<LinkKey, Long> TRACKER_STOP_SUPPRESSION_UNTIL = new HashMap<>();
+    /**
+     * Per-tracker last-activity tick. Updated for every MIDI event passing
+     * through {@link #dispatchNote} (NoteOn, NoteOff, ProgramChange, CC -
+     * literally anything). The level-tick watchdog
+     * {@link #pruneAbandonedTrackers} compares this against {@code currentTick}
+     * and, if the tracker has gone silent while still owning in-flight notes,
+     * fires {@link #onTrackerStopped} so mobs/deployers/etc. that received
+     * sustaining NoteOns get explicit NoteOffs instead of holding the voice
+     * forever (which is the user-visible symptom: "stop the tracker, mob still
+     * rings the last note").
+     */
+    private static final Map<LinkKey, Long> LAST_TRACKER_ACTIVITY_TICK = new HashMap<>();
+    /**
+     * Window of inactivity, in ticks, after which a tracker that still owns
+     * tracked notes is presumed stopped and its tracked notes are released.
+     *
+     * <p>Tuning rationale: a normal MIDI stream emits something (CC, tempo
+     * meta, drum hits, melody NoteOn/Off) far more frequently than this. A
+     * legitimately-sustained chord with zero accompanying events for a full
+     * 1.5 s is rare even on sparse tracks, while a player pressing "Stop" on
+     * a tracker bar produces exactly that signature: an in-flight note and no
+     * subsequent events at all. Erring on this side keeps the recovery
+     * responsive without falsely chopping long-tail pads.</p>
+     */
+    private static final long TRACKER_INACTIVITY_FLUSH_TICKS = 30;
     /** Expiration state for transient automation holders (deployer interactions, depot/ground stack targets). */
     private static final Map<UUID, TransientHolderState> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
 
@@ -159,6 +192,7 @@ public final class PolyphonyLinkManager {
     public static void onLevelTick(ServerLevel level) {
         pruneExpiredTransientHolders(level);
         pruneExpiredStopSuppression(level);
+        pruneAbandonedTrackers(level);
         long gameTime = level.getGameTime();
         if (gameTime % MOB_SYNC_INTERVAL_TICKS != 0) return;
         syncMobHolders(level);
@@ -175,10 +209,16 @@ public final class PolyphonyLinkManager {
     public static void onPlayerChangedDimension(ServerPlayer player) {
         // Panic packet: command 0xF0 is the client-side "stop everything" sentinel.
         UUID id = player.getUUID();
+        // Use the player's real UUID as the bus id for the panic - the client
+        // panic path stops every active SourceBus regardless of key, so this
+        // reaches all of the player's per-hand buses.
         PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
-            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits()));
+            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
-        ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> byNote.values().removeIf(id::equals));
+        ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> {
+            byNote.values().forEach(owners -> owners.removeIf(o -> id.equals(o.realHolderId())));
+            byNote.entrySet().removeIf(e -> e.getValue().isEmpty());
+        });
         ACTIVE_NOTE_OWNERS.entrySet().removeIf(e -> e.getValue().isEmpty());
     }
 
@@ -238,14 +278,16 @@ public final class PolyphonyLinkManager {
     public static void onTrackerStopped(ServerLevel level, BlockPos pos) {
         LinkKey key = LinkKey.of(level, pos);
         TRACKER_STOP_SUPPRESSION_UNTIL.put(key, currentServerTick(level.getServer()) + TRACKER_STOP_SUPPRESSION_TICKS);
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
-        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
             ActiveNoteKey active = entry.getKey();
-            UUID owner = entry.getValue();
-            Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, pos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            for (TrackedOwner owner : List.copyOf(entry.getValue())) {
+                Vec3 ownerPos = resolveHolderPosition(level, owner.realHolderId());
+                sendNotePacket(level, pos, ownerPos, owner.realHolderId(), owner.sourceBusId(),
+                    0, active.channel(), 0x80, active.note(), 0, 0L);
+            }
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
@@ -282,9 +324,25 @@ public final class PolyphonyLinkManager {
      * @param data2     MIDI data byte 2 (velocity for NoteOn/Off; ignored for ProgramChange).
      */
     public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
+        dispatchNote(level, pos, status, data1, data2, System.nanoTime());
+    }
+
+    /**
+     * Variant that accepts the {@link System#nanoTime()} stamp captured at the
+     * moment the upstream sequencer emitted this event. The stamp is forwarded
+     * to clients so they can schedule the event for sample-accurate playback,
+     * decoupling audible timing from network/render jitter.
+     */
+    public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2, long eventNanos) {
         int command = status & 0xF0;
         int channel = status & 0x0F;
         LinkKey key = LinkKey.of(level, pos);
+
+        // Stamp activity for the abandoned-tracker watchdog. Any event from
+        // the tracker (NoteOn, NoteOff, CC, ProgramChange, system) counts as
+        // "still alive". When this stops being updated while we still own
+        // in-flight notes, pruneAbandonedTrackers releases them.
+        LAST_TRACKER_ACTIVITY_TICK.put(key, currentServerTick(level.getServer()));
 
         if (command == 0xC0 /* ProgramChange */) {
             rememberChannelProgram(key, channel, data1 & 0x7F);
@@ -303,13 +361,20 @@ public final class PolyphonyLinkManager {
         // started by automation holders (deployers etc.) are properly stopped even
         // after their TTL has expired and their link participation has been removed.
         if (noteOff) {
-            UUID recordedOwner = consumeTrackedOwner(key, new ActiveNoteKey(channel, note));
-            if (recordedOwner != null) {
-                Vec3 recordedOwnerPos = resolveHolderPosition(level, recordedOwner);
-                if (sendNotePacket(level, pos, recordedOwnerPos, recordedOwner, 0, channel, 0x80, note, velocity)) {
-                    debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, recordedOwner);
-                } else {
-                    debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
+            List<TrackedOwner> recordedOwners = consumeTrackedOwners(key, new ActiveNoteKey(channel, note));
+            if (recordedOwners != null && !recordedOwners.isEmpty()) {
+                // Multiple buses can hold the same (channel, note) simultaneously
+                // when several linked instruments are routed to the same channel
+                // (e.g. main hand + off hand both playing it). Each bus needs its
+                // own NoteOff packet so the corresponding voice is freed.
+                for (TrackedOwner owner : recordedOwners) {
+                    Vec3 recordedOwnerPos = resolveHolderPosition(level, owner.realHolderId());
+                    if (sendNotePacket(level, pos, recordedOwnerPos, owner.realHolderId(), owner.sourceBusId(),
+                        0, channel, 0x80, note, velocity, eventNanos)) {
+                        debugRoute("sent:tracked-note-off", level, pos, status, data1, data2, owner.realHolderId());
+                    } else {
+                        debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, owner.realHolderId());
+                    }
                 }
                 return;
             }
@@ -362,65 +427,95 @@ public final class PolyphonyLinkManager {
         // (Tracked NoteOff already handled above; this branch only reached if no prior
         //  track entry existed — fall through to current-assignee delivery as normal.)
 
-        PolyphonyLink.ChannelAssignee assignee = link.assigneeFor(channel);
-        if (assignee == null) {
+        List<PolyphonyLink.ChannelAssignee> assignees = link.assigneesFor(channel);
+        if (assignees.isEmpty()) {
             debugRoute("drop:no-assignee", level, pos, status, data1, data2, null);
             return;
         }
 
-        UUID assigneePlayerId = assignee.playerId();
-
-        ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneePlayerId);
-        if (target != null && !holdsLinkedInstrument(target, key)) {
-            // Don't hard-drop note routing here; assignment already came from held-link sync.
-            debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneePlayerId);
-        }
-
-        // Resolve the assignee's held instrument family and force playback timbre to it.
-        // This keeps player output aligned with what they're physically holding.
-        InstrumentFamily family = assignee.family();
-
-        // Safety belt: even if assignment data got stale, keep drums isolated.
-        // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
-        if (!family.isWildcard()) {
-            if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
-                return;
-            }
-            if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
-                debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assigneePlayerId);
-                return;
-            }
-        }
-
-        // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
-        // supported instrument families, controlled by config.
-        int program;
-        if (family.isWildcard()) {
-            int trackedProgram = trackedProgramFor(key, channel, link);
-            if (Config.oneManBandUsesAllGmPrograms()) {
-                program = trackedProgram;
-            } else {
-                InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, trackedProgram);
-                program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
-            }
-        } else {
-            program = (channel == 9) ? 127 : family.canonicalGmProgram();
-        }
-
-        Vec3 holderPos = resolveHolderPosition(level, assigneePlayerId);
-        if (sendNotePacket(level, pos, holderPos, assigneePlayerId, program, channel, command, note, velocity)) {
-            if (!noteOff) {
-                UUID previousOwner = trackNoteOwner(key, activeNoteKey, assigneePlayerId);
-                if (previousOwner != null && !Objects.equals(previousOwner, assigneePlayerId)) {
-                    Vec3 previousOwnerPos = resolveHolderPosition(level, previousOwner);
-                    sendNotePacket(level, pos, previousOwnerPos, previousOwner, 0, channel, 0x80, note, 0);
-                    debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, previousOwner);
+        // Hand off any voices owned by buses that are no longer assigned to
+        // this (channel, note) before introducing the new ones, so dropped
+        // hands/instruments don't leak hanging voices on the client.
+        if (!noteOff) {
+            List<TrackedOwner> previousOwners = ACTIVE_NOTE_OWNERS.getOrDefault(key, Map.of()).get(activeNoteKey);
+            if (previousOwners != null && !previousOwners.isEmpty()) {
+                for (TrackedOwner prev : List.copyOf(previousOwners)) {
+                    boolean stillAssigned = false;
+                    for (PolyphonyLink.ChannelAssignee a : assignees) {
+                        if (prev.sourceBusId().equals(a.sourceBusId())) {
+                            stillAssigned = true;
+                            break;
+                        }
+                    }
+                    if (stillAssigned) continue;
+                    Vec3 prevPos = resolveHolderPosition(level, prev.realHolderId());
+                    sendNotePacket(level, pos, prevPos, prev.realHolderId(), prev.sourceBusId(),
+                        0, channel, 0x80, note, 0, 0L);
+                    untrackNoteOwner(key, activeNoteKey, prev);
+                    debugRoute("sent:handoff-note-off", level, pos, status, data1, data2, prev.realHolderId());
                 }
             }
-            debugRoute("sent", level, pos, status, data1, data2, assigneePlayerId);
-        } else {
-            debugRoute("drop:no-player", level, pos, status, data1, data2, assigneePlayerId);
+        }
+
+        // Dispatch to every eligible participant so each held instrument
+        // produces simultaneous, independently-bused audio on the client.
+        boolean anySent = false;
+        for (PolyphonyLink.ChannelAssignee assignee : assignees) {
+            UUID assigneeRealId = assignee.realHolderId();
+            UUID assigneeBusId = assignee.sourceBusId();
+
+            ServerPlayer target = level.getServer().getPlayerList().getPlayer(assigneeRealId);
+            if (target != null && !holdsLinkedInstrument(target, key)) {
+                // Don't hard-drop note routing here; assignment already came from held-link sync.
+                debugRoute("warn:not-holding", level, pos, status, data1, data2, assigneeRealId);
+            }
+
+            // Resolve the assignee's held instrument family and force playback timbre to it.
+            // This keeps player output aligned with what they're physically holding.
+            InstrumentFamily family = assignee.family();
+
+            // Safety belt: even if assignment data got stale, keep drums isolated.
+            // ONE_MAN_BAND (wildcard) is exempt - it intentionally covers all channels.
+            if (!family.isWildcard()) {
+                if (channel == 9 && family != InstrumentFamily.DRUM_KIT) {
+                    debugRoute("drop:drums-no-drum-kit", level, pos, status, data1, data2, assigneeRealId);
+                    continue;
+                }
+                if (channel != 9 && family == InstrumentFamily.DRUM_KIT) {
+                    debugRoute("drop:melodic-drum-kit", level, pos, status, data1, data2, assigneeRealId);
+                    continue;
+                }
+            }
+
+            // ONE_MAN_BAND can either use raw MIDI programs or be constrained to our
+            // supported instrument families, controlled by config.
+            int program;
+            if (family.isWildcard()) {
+                int trackedProgram = trackedProgramFor(key, channel, link);
+                if (Config.oneManBandUsesAllGmPrograms()) {
+                    program = trackedProgram;
+                } else {
+                    InstrumentFamily mapped = InstrumentFamily.forMidiChannelAndProgram(channel, trackedProgram);
+                    program = (channel == 9) ? 127 : mapped.canonicalGmProgram();
+                }
+            } else {
+                program = (channel == 9) ? 127 : family.canonicalGmProgram();
+            }
+
+            Vec3 holderPos = resolveHolderPosition(level, assigneeRealId);
+            if (sendNotePacket(level, pos, holderPos, assigneeRealId, assigneeBusId,
+                program, channel, command, note, velocity, eventNanos)) {
+                anySent = true;
+                if (!noteOff) {
+                    trackNoteOwner(key, activeNoteKey, new TrackedOwner(assigneeRealId, assigneeBusId));
+                }
+                debugRoute("sent", level, pos, status, data1, data2, assigneeRealId);
+            } else {
+                debugRoute("drop:no-player", level, pos, status, data1, data2, assigneeRealId);
+            }
+        }
+        if (!anySent && !noteOff) {
+            debugRoute("drop:no-player-any", level, pos, status, data1, data2, null);
         }
     }
 
@@ -450,18 +545,23 @@ public final class PolyphonyLinkManager {
      * @param trackerPos   the tracker block position (kept for diagnostic context).
      * @param holderPos    world position of the holder (mob / deployer); ignored when
      *                     the holder resolves to a live ServerPlayer.
-     * @param holderId     UUID of the channel assignee (player UUID or non-player pseudo-UUID).
+     * @param realHolderId UUID of the actual holder (player / mob / automation), used
+     *                     for player resolution and selfPlay flag determination.
+     * @param sourceBusId  per-(holder, hand) UUID transmitted to the client as the audio
+     *                     bus key. Distinct from {@code realHolderId} so a single player
+     *                     holding two instruments produces two independent client buses.
      */
     private static boolean sendNotePacket(ServerLevel trackerLevel, BlockPos trackerPos,
-                                          @Nullable Vec3 holderPos, UUID holderId,
-                                          int program, int channel, int command, int note, int velocity) {
+                                          @Nullable Vec3 holderPos, UUID realHolderId, UUID sourceBusId,
+                                          int program, int channel, int command, int note, int velocity,
+                                          long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
         int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
         double maxDist = maxDistanceBlocksInt;
         double maxDistSq = maxDist * maxDist;
 
         // ---- Direct player recipient ----
-        ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(holderId);
+        ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(realHolderId);
         if (directPlayer != null) {
             // Dimension gate: a holder in another dimension is not participating in this
             // tracker's audio at all (their world-space position is meaningless to listeners
@@ -476,7 +576,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(directPlayer, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 true, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
 
             // Also broadcast to nearby observers so they can hear the player positionally.
             // Mirrors the non-player holder branch: gate by each watcher's distance to the
@@ -490,7 +590,7 @@ public final class PolyphonyLinkManager {
                 PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                     program, channel, command, note, velocity,
                     false, (float) pp.x, (float) pp.y, (float) pp.z, maxDistanceBlocksInt,
-                    holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                    sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
             }
             return true;
         }
@@ -501,7 +601,7 @@ public final class PolyphonyLinkManager {
         Vec3 srcPos = holderPos;
         if (srcPos == null) {
             if (isNoteOn) {
-                warnMissingHolderPosition(trackerLevel, trackerPos, holderId, channel, note);
+                warnMissingHolderPosition(trackerLevel, trackerPos, realHolderId, channel, note);
                 return false;
             }
             srcPos = Vec3.ZERO;
@@ -519,7 +619,7 @@ public final class PolyphonyLinkManager {
             PacketDistributor.sendToPlayer(watcher, new PlayInstrumentNotePayload(
                 program, channel, command, note, velocity,
                 false, (float) srcPos.x, (float) srcPos.y, (float) srcPos.z, maxDistanceBlocksInt,
-                holderId.getMostSignificantBits(), holderId.getLeastSignificantBits()));
+                sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), eventNanos));
             sent = true;
         }
         return sent;
@@ -576,58 +676,131 @@ public final class PolyphonyLinkManager {
         return null;
     }
 
-    private static UUID trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, UUID assignee) {
-        return ACTIVE_NOTE_OWNERS
-            .computeIfAbsent(key, ignored -> new HashMap<>())
-            .put(noteKey, assignee);
+    private static void trackNoteOwner(LinkKey key, ActiveNoteKey noteKey, TrackedOwner owner) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.computeIfAbsent(key, ignored -> new HashMap<>());
+        List<TrackedOwner> owners = byNote.computeIfAbsent(noteKey, ignored -> new ArrayList<>(2));
+        // Keep the list de-duplicated on bus id; a re-trigger of the same note
+        // by the same bus shouldn't grow the owner list unboundedly.
+        for (TrackedOwner existing : owners) {
+            if (existing.sourceBusId().equals(owner.sourceBusId())) return;
+        }
+        owners.add(owner);
+    }
+
+    private static void untrackNoteOwner(LinkKey key, ActiveNoteKey noteKey, TrackedOwner owner) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote == null) return;
+        List<TrackedOwner> owners = byNote.get(noteKey);
+        if (owners == null) return;
+        owners.removeIf(o -> o.sourceBusId().equals(owner.sourceBusId()));
+        if (owners.isEmpty()) byNote.remove(noteKey);
+        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     private static void flushTrackedNotesForChannel(ServerLevel level, BlockPos trackerPos, int channel) {
         LinkKey key = LinkKey.of(level, trackerPos);
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
-        for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
+        for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
             ActiveNoteKey active = entry.getKey();
             if ((active.channel() & 0x0F) != (channel & 0x0F)) continue;
-            UUID owner = entry.getValue();
-            Vec3 ownerPos = resolveHolderPosition(level, owner);
-            sendNotePacket(level, trackerPos, ownerPos, owner, 0, active.channel(), 0x80, active.note(), 0);
+            for (TrackedOwner owner : List.copyOf(entry.getValue())) {
+                Vec3 ownerPos = resolveHolderPosition(level, owner.realHolderId());
+                sendNotePacket(level, trackerPos, ownerPos, owner.realHolderId(), owner.sourceBusId(),
+                    0, active.channel(), 0x80, active.note(), 0, 0L);
+            }
             byNote.remove(active);
         }
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
     }
 
     @Nullable
-    private static UUID consumeTrackedOwner(LinkKey key, ActiveNoteKey noteKey) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+    private static List<TrackedOwner> consumeTrackedOwners(LinkKey key, ActiveNoteKey noteKey) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null) return null;
-        UUID owner = byNote.remove(noteKey);
+        List<TrackedOwner> owners = byNote.remove(noteKey);
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
-        return owner;
+        return owners;
     }
 
     private static boolean hasTrackedNotes(LinkKey key) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
         return byNote != null && !byNote.isEmpty();
     }
 
-    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID holderId) {
-        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
-        if (byNote == null || byNote.isEmpty()) return;
-
-        if (level != null) {
-            for (Map.Entry<ActiveNoteKey, UUID> entry : Map.copyOf(byNote).entrySet()) {
-                if (!holderId.equals(entry.getValue())) continue;
+    private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID realHolderId) {
+        Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        if (byNote != null && !byNote.isEmpty()) {
+            for (Map.Entry<ActiveNoteKey, List<TrackedOwner>> entry : Map.copyOf(byNote).entrySet()) {
                 ActiveNoteKey active = entry.getKey();
-                Vec3 holderPos = resolveHolderPosition(level, holderId);
-                sendNotePacket(level, key.pos(), holderPos, holderId, 0, active.channel(), 0x80, active.note(), 0);
-                byNote.remove(active);
+                List<TrackedOwner> owners = entry.getValue();
+                for (TrackedOwner owner : List.copyOf(owners)) {
+                    if (!realHolderId.equals(owner.realHolderId())) continue;
+                    if (level != null) {
+                        Vec3 holderPos = resolveHolderPosition(level, realHolderId);
+                        sendNotePacket(level, key.pos(), holderPos, realHolderId, owner.sourceBusId(),
+                            0, active.channel(), 0x80, active.note(), 0, 0L);
+                    }
+                    owners.remove(owner);
+                }
+                if (owners.isEmpty()) byNote.remove(active);
             }
+            if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
         }
 
-        byNote.values().removeIf(holderId::equals);
-        if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
+        // Belt-and-suspenders: even if note tracking missed an owner (e.g. due to a
+        // dispatch that took a different code path, a desync between LinkKey
+        // identities, or a client bus that received an early NoteOn from before
+        // the server registered the owner), explicitly tell the client to silence
+        // every voice on this holder's per-hand source buses. The client treats
+        // command 0xF0 with note=1 as "stop the SourceBus identified by
+        // (sourceMost, sourceLeast)" - so any ringing voice on either hand is
+        // cut immediately. Without this, voices could persist until the bus's
+        // 12s idle timeout (which itself only fires off the back of an unrelated
+        // incoming packet), producing the "indefinitely held note" symptom.
+        if (level != null) {
+            sendBusStopPacket(level, key.pos(), realHolderId, PolyphonyLink.mainHandBusId(realHolderId));
+            sendBusStopPacket(level, key.pos(), realHolderId, PolyphonyLink.offHandBusId(realHolderId));
+        }
+    }
+
+    /**
+     * Broadcasts a per-bus stop sentinel ({@code command=0xF0, note=1}) to the
+     * holder (selfPlay) and every player in {@code level} so all clients with
+     * a matching {@code SourceBus} silence it at once.
+     *
+     * <p>The packet carries {@code serverNanos = System.nanoTime()} (the
+     * server-side emit time of the stop, <i>not</i> {@code 0L}). Any in-flight
+     * NoteOn/NoteOff that the upstream MIDI sequencer emitted before this stop
+     * therefore has a strictly smaller {@code serverNanos}, which lets the
+     * client identify and drop those late packets instead of letting them
+     * spawn a fresh {@link org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler
+     * SourceBus} after the panic. (The 0xF0 path on the client bypasses the
+     * scheduler regardless of the timestamp, so encoding the emit time here
+     * doesn't delay the silence.)</p>
+     */
+    private static void sendBusStopPacket(ServerLevel level, BlockPos trackerPos, UUID realHolderId, UUID sourceBusId) {
+        int maxDistanceBlocksInt = simulationDistanceBlocks(level.getServer());
+        long stopNanos = System.nanoTime();
+        PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(
+            0, 0, 0xF0, 1, 0,
+            false, (float) trackerPos.getX(), (float) trackerPos.getY(), (float) trackerPos.getZ(),
+            maxDistanceBlocksInt,
+            sourceBusId.getMostSignificantBits(), sourceBusId.getLeastSignificantBits(), stopNanos);
+
+        // Direct send to the holder if they're an online player so they hear their
+        // own bus stop instantly, regardless of where they wandered.
+        ServerPlayer holderPlayer = level.getServer().getPlayerList().getPlayer(realHolderId);
+        if (holderPlayer != null) {
+            PacketDistributor.sendToPlayer(holderPlayer, payload);
+        }
+        // Broadcast to everyone in the level: any of them may hold a positional
+        // bus for this holder/hand from prior NoteOns and need to silence it too.
+        for (ServerPlayer watcher : level.players()) {
+            if (watcher == holderPlayer) continue;
+            PacketDistributor.sendToPlayer(watcher, payload);
+        }
     }
 
     @Nullable
@@ -659,7 +832,18 @@ public final class PolyphonyLinkManager {
         for (Map.Entry<LinkKey, HeldInstruments> entry : desired.entrySet()) {
             LinkKey key = entry.getKey();
             HeldInstruments held = entry.getValue();
-            if (current != null && held.equals(current.get(key))) continue;
+            HeldInstruments prior = current != null ? current.get(key) : null;
+            if (held.equals(prior)) continue;
+
+            // Held-instrument state changed for an already-linked holder (e.g. main<->off
+            // swap, instrument item replaced, family changed). The per-(holder, hand)
+            // sourceBusId derives from the hand slot, so the new participant lands on a
+            // different client bus than the one currently holding any in-flight notes.
+            // Force-stop everything this holder still owns on this link before
+            // re-registering, so the stale bus doesn't keep ringing the old timbre.
+            if (prior != null) {
+                forceStopNotesOwnedBy(levelHint, key, holderId);
+            }
 
             PolyphonyLink link = LINKS.get(key);
             if (link == null) {
@@ -705,11 +889,14 @@ public final class PolyphonyLinkManager {
         for (Map.Entry<UUID, TransientHolderState> entry : Map.copyOf(TRANSIENT_HOLDER_EXPIRY).entrySet()) {
             if (entry.getValue().expiryTick() > now) continue;
             UUID holderId = entry.getKey();
-            TRANSIENT_HOLDER_EXPIRY.remove(holderId);
-            // Soft-expire: remove channel assignment but do NOT force-stop notes.
-            // Any in-flight notes are tracked in ACTIVE_NOTE_OWNERS; their NoteOffs
-            // will arrive from the MIDI sequencer and route correctly via consumeTrackedOwner.
-            removeHolderAssignmentOnly(holderId);
+            TransientHolderState state = TRANSIENT_HOLDER_EXPIRY.remove(holderId);
+            // Hard-expire: the deployer (or other transient holder) has stopped activating
+            // / is no longer holding a linked instrument. Per spec, any swap of a holder's
+            // instrument state must immediately stop everything it was playing - waiting for
+            // a possibly-distant sequencer NoteOff would leave audible notes ringing well
+            // past the moment the holder ceased to participate.
+            ServerLevel removeLevel = state != null ? state.level() : level;
+            removeHolder(holderId, removeLevel);
         }
     }
 
@@ -722,27 +909,46 @@ public final class PolyphonyLinkManager {
     }
 
     /**
-     * Removes a holder's channel-assignment participation without sending NoteOff packets.
-     * Used for TTL-based soft expiry of automation (deployer) holders.
-     * Contrast with {@link #removeHolder} which also force-stops all tracked notes.
+     * Watchdog: any tracker in this level whose last MIDI activity was more
+     * than {@link #TRACKER_INACTIVITY_FLUSH_TICKS} ago AND that still owns
+     * in-flight tracked notes is presumed to have stopped without sending the
+     * matching NoteOffs (player pressed stop, sequencer was halted from a UI,
+     * tracker was de-powered, etc.). Run {@link #onTrackerStopped} to release
+     * those tracked notes so non-player holders (mobs, deployers) don't ring
+     * the last NoteOn forever.
+     *
+     * <p>The activity timestamp is also forgotten for trackers that no longer
+     * own any tracked notes - keeping the map from growing without bound when
+     * many one-shot trackers come and go around the world.</p>
      */
-    private static void removeHolderAssignmentOnly(UUID holderId) {
-        Map<LinkKey, HeldInstruments> current = ACTIVE_HAND_LINKS.remove(holderId);
-        if (current == null) return;
-        for (LinkKey key : current.keySet()) {
-            PolyphonyLink link = LINKS.get(key);
-            if (link == null) continue;
-            link.removePlayer(holderId);
-            if (link.isEmpty()) {
-                LINKS.remove(key);
-                // Intentionally keep ACTIVE_NOTE_OWNERS entries alive: NoteOffs that
-                // arrive after the link goes empty still need to route to their owner
-                // (via consumeTrackedOwner in dispatchNote) to stop client synth voices.
-                CHANNEL_PROGRAM_SNAPSHOT.remove(key);
-                TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
+    private static void pruneAbandonedTrackers(ServerLevel level) {
+        if (LAST_TRACKER_ACTIVITY_TICK.isEmpty()) return;
+        long now = currentServerTick(level.getServer());
+        String levelPath = level.dimension().location().toString();
+
+        for (Map.Entry<LinkKey, Long> entry : Map.copyOf(LAST_TRACKER_ACTIVITY_TICK).entrySet()) {
+            LinkKey key = entry.getKey();
+            if (!levelPath.equals(key.levelPath())) continue;
+
+            long lastActivity = entry.getValue();
+            if (now - lastActivity < TRACKER_INACTIVITY_FLUSH_TICKS) continue;
+
+            // No tracked notes: this tracker isn't holding anything, just retire
+            // its activity record so we don't scan it again.
+            Map<ActiveNoteKey, List<TrackedOwner>> byNote = ACTIVE_NOTE_OWNERS.get(key);
+            if (byNote == null || byNote.isEmpty()) {
+                LAST_TRACKER_ACTIVITY_TICK.remove(key);
+                continue;
             }
+
+            // Has tracked notes AND has gone silent: presume stopped and flush.
+            // onTrackerStopped sends explicit NoteOff packets for every tracked
+            // owner, which is what makes mobs/deployers/etc. stop ringing.
+            onTrackerStopped(level, key.pos());
+            LAST_TRACKER_ACTIVITY_TICK.remove(key);
         }
     }
+
 
     private static boolean isPostStopNoteOnSuppressed(ServerLevel level, LinkKey key, int command, int velocity) {
         if ((command & 0xF0) != 0x90 || (velocity & 0x7F) == 0) return false;
@@ -973,6 +1179,14 @@ public final class PolyphonyLinkManager {
     }
 
     private record ActiveNoteKey(int channel, int note) { }
+
+    /**
+     * One in-flight note's bus-level owner. {@code realHolderId} is the actual
+     * player/mob/automation holder used for player resolution and selfPlay
+     * gating; {@code sourceBusId} is the per-(holder, hand) bus key transmitted
+     * to the client so the matching NoteOff stops the correct synth voice.
+     */
+    private record TrackedOwner(UUID realHolderId, UUID sourceBusId) { }
 
     private static void debugRoute(String phase, ServerLevel level, BlockPos pos,
                                    int status, int data1, int data2, @Nullable UUID assignee) {

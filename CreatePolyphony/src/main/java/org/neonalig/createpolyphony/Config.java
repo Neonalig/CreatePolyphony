@@ -8,12 +8,6 @@ import org.neonalig.createpolyphony.synth.SynthSettings;
 public class Config {
     private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
-    public enum AudioTimingPreset {
-        STABLE,
-        BALANCED,
-        RESPONSIVE
-    }
-
     public enum DeployerPlaybackMode {
         CONTINUOUS_POWERED,
         INTERACTION_ONLY
@@ -31,21 +25,17 @@ public class Config {
         .comment("How many PCM bytes each synth render chunk targets during manual SoundFont synthesis.")
         .defineInRange("pumpChunkBytes", 4_096, 512, 65_536);
 
-    public static final ModConfigSpec.IntValue ADAPTIVE_MIN_SUBCHUNK_BYTES = BUILDER
-        .comment("Adaptive stream renderer minimum subchunk size in bytes. Higher values are steadier but less reactive.")
-        .defineInRange("adaptiveMinSubchunkBytes", 2_048, 256, 32_768);
+    public static final ModConfigSpec.IntValue SCHEDULING_DELAY_MS = BUILDER
+        .comment("Look-ahead jitter buffer applied to incoming MIDI events, in milliseconds.",
+            "All notes play exactly this long after the server emitted them, so network/render jitter under this budget is inaudible.",
+            "Higher = more rock-solid timing under unstable networks; lower = more responsive on local play.",
+            "60 ms is comfortable for most setups; 120 ms is bulletproof; below 40 ms you may hear warble again.")
+        .defineInRange("schedulingDelayMs", 120, 0, 1000);
 
-    public static final ModConfigSpec.IntValue ADAPTIVE_MAX_SUBCHUNK_BYTES = BUILDER
-        .comment("Adaptive stream renderer maximum subchunk size in bytes. Must be >= min.")
-        .defineInRange("adaptiveMaxSubchunkBytes", 8_192, 256, 65_536);
-
-    public static final ModConfigSpec.IntValue ADAPTIVE_TARGET_RENDER_NS = BUILDER
-        .comment("Adaptive stream target render time per subchunk in nanoseconds.")
-        .defineInRange("adaptiveTargetRenderNs", 1_500_000, 250_000, 10_000_000);
-
-    public static final ModConfigSpec.DoubleValue ADAPTIVE_EWMA_ALPHA = BUILDER
-        .comment("Smoothing factor for adaptive timing controller (0..1). Lower = steadier, higher = more reactive.")
-        .defineInRange("adaptiveEwmaAlpha", 0.15D, 0.01D, 1.0D);
+    public static final ModConfigSpec.IntValue CLOCK_SYNC_INTERVAL_MS = BUILDER
+        .comment("How often the client probes the server for clock-offset updates, in milliseconds.",
+            "Lower values catch slow drift faster at negligible bandwidth cost (16 bytes per ping).")
+        .defineInRange("clockSyncIntervalMs", 5_000, 500, 60_000);
 
     public static final ModConfigSpec.BooleanValue ONE_MAN_BAND_USE_ALL_GM_PROGRAMS = BUILDER
         .comment("If true, One Man Band uses raw MIDI programs for full GM playback.",
@@ -90,54 +80,12 @@ public class Config {
 
     static final ModConfigSpec SPEC = BUILDER.build();
 
-    public static void applyAudioTimingPreset(AudioTimingPreset preset) {
-        switch (preset) {
-            case STABLE -> {
-                ADAPTIVE_MIN_SUBCHUNK_BYTES.set(4_096);
-                ADAPTIVE_MAX_SUBCHUNK_BYTES.set(8_192);
-                ADAPTIVE_TARGET_RENDER_NS.set(2_000_000);
-                ADAPTIVE_EWMA_ALPHA.set(0.08D);
-            }
-            case BALANCED -> {
-                ADAPTIVE_MIN_SUBCHUNK_BYTES.set(2_048);
-                ADAPTIVE_MAX_SUBCHUNK_BYTES.set(8_192);
-                ADAPTIVE_TARGET_RENDER_NS.set(1_500_000);
-                ADAPTIVE_EWMA_ALPHA.set(0.15D);
-            }
-            case RESPONSIVE -> {
-                ADAPTIVE_MIN_SUBCHUNK_BYTES.set(1_024);
-                ADAPTIVE_MAX_SUBCHUNK_BYTES.set(6_144);
-                ADAPTIVE_TARGET_RENDER_NS.set(1_000_000);
-                ADAPTIVE_EWMA_ALPHA.set(0.30D);
-            }
-        }
-        normalizeAdaptiveBounds();
+    public static int schedulingDelayMs() {
+        return SCHEDULING_DELAY_MS.get();
     }
 
-    public static void normalizeAdaptiveBounds() {
-        int min = ADAPTIVE_MIN_SUBCHUNK_BYTES.get();
-        int max = ADAPTIVE_MAX_SUBCHUNK_BYTES.get();
-        if (max < min) {
-            ADAPTIVE_MAX_SUBCHUNK_BYTES.set(min);
-        }
-    }
-
-    public static int adaptiveMinSubchunkBytes() {
-        normalizeAdaptiveBounds();
-        return ADAPTIVE_MIN_SUBCHUNK_BYTES.get();
-    }
-
-    public static int adaptiveMaxSubchunkBytes() {
-        normalizeAdaptiveBounds();
-        return ADAPTIVE_MAX_SUBCHUNK_BYTES.get();
-    }
-
-    public static int adaptiveTargetRenderNs() {
-        return ADAPTIVE_TARGET_RENDER_NS.get();
-    }
-
-    public static double adaptiveEwmaAlpha() {
-        return ADAPTIVE_EWMA_ALPHA.get();
+    public static int clockSyncIntervalMs() {
+        return CLOCK_SYNC_INTERVAL_MS.get();
     }
 
     public static boolean oneManBandUsesAllGmPrograms() {
