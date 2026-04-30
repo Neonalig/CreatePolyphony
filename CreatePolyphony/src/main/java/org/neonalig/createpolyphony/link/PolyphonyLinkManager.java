@@ -313,6 +313,12 @@ public final class PolyphonyLinkManager {
                 }
                 return;
             }
+            // Optimization: once no tracked notes remain on this tracker, ignore
+            // unmatched NoteOff noise until a new NoteOn is tracked again.
+            if (!hasTrackedNotes(key)) {
+                debugRoute("drop:untracked-note-off", level, pos, status, data1, data2, null);
+                return;
+            }
         }
 
         PolyphonyLink link = get(level, pos);
@@ -599,6 +605,11 @@ public final class PolyphonyLinkManager {
         UUID owner = byNote.remove(noteKey);
         if (byNote.isEmpty()) ACTIVE_NOTE_OWNERS.remove(key);
         return owner;
+    }
+
+    private static boolean hasTrackedNotes(LinkKey key) {
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        return byNote != null && !byNote.isEmpty();
     }
 
     private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID holderId) {
