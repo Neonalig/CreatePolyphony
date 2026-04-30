@@ -112,7 +112,7 @@ public final class PolyphonyClientNoteHandler {
         long serverNanos = payload.serverNanos();
         if (serverNanos == 0L) {
             // Immediate-delivery (server-initiated stop without sub-tick precision).
-            applyOnMain(payload);
+            applyOnMain(payload, 0L);
             return;
         }
 
@@ -126,21 +126,26 @@ public final class PolyphonyClientNoteHandler {
             localTargetNanos = now;
         }
 
-        PolyphonyEventScheduler.scheduleAt(localTargetNanos, () -> applyOnMain(payload));
+        long finalTarget = localTargetNanos;
+        PolyphonyEventScheduler.scheduleAt(finalTarget, () -> applyOnMain(payload, finalTarget));
     }
 
     /**
      * Hand the event off to the Minecraft client thread so we can safely touch
-     * sound-engine state. The client-thread queue is drained at vsync rate
-     * (every render frame, &lt; 16 ms), so this adds at most a frame of jitter
-     * on top of the scheduler's nanosecond-precise wake.
+     * sound-engine state. The note itself is enqueued into the synth with its
+     * exact target nanos (Phase 5 sample-accurate dispatch); positional /
+     * stream-lifecycle work happens immediately.
+     *
+     * @param targetNanos local-clock {@link System#nanoTime()} the note should
+     *                    sound at, or {@code 0L} for immediate ("now") delivery
+     *                    (panic, server-initiated force-stop).
      */
-    private static void applyOnMain(PlayInstrumentNotePayload payload) {
+    private static void applyOnMain(PlayInstrumentNotePayload payload, long targetNanos) {
         Minecraft mc = Minecraft.getInstance();
-        mc.execute(() -> dispatch(payload));
+        mc.execute(() -> dispatch(payload, targetNanos));
     }
 
-    private static void dispatch(PlayInstrumentNotePayload payload) {
+    private static void dispatch(PlayInstrumentNotePayload payload, long targetNanos) {
         Minecraft mc = Minecraft.getInstance();
         LocalPlayer player = mc.player;
         if (player == null || mc.level == null) return;
@@ -195,14 +200,17 @@ public final class PolyphonyClientNoteHandler {
         if (noteOn) {
             // Program is only meaningful for NoteOn; applying it here prevents NoteOff-only
             // safety packets from altering timbre state on the channel.
+            // Both the program change and the note are stamped with the same
+            // target nanos so the synth applies them at the exact same sample
+            // boundary - no audible "wrong-timbre first attack" gap.
             if (bus.lastProgram[channel] != program) {
-                bus.synth.programChange(channel, program);
+                bus.synth.programChangeAt(channel, program, targetNanos);
                 bus.lastProgram[channel] = program;
             }
-            bus.synth.noteOn(channel, note, velocity);
+            bus.synth.noteOnAt(channel, note, velocity, targetNanos);
             debugNote("note-on", payload);
         } else if (payload.isNoteOff()) {
-            bus.synth.noteOff(channel, note);
+            bus.synth.noteOffAt(channel, note, targetNanos);
             debugNote("note-off", payload);
         }
         pruneIdleBuses(player.tickCount);

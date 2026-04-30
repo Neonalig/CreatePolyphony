@@ -110,6 +110,40 @@ public final class PolyphonySynthesizer {
         engine.controlChange(channel, controller, value);
     }
 
+    // ---- Timed entry points: events apply at exact sample positions inside the synth ---------
+    //
+    // {@code nanos} is a {@link System#nanoTime()} target in the LOCAL JVM clock.
+    // The synth's render loop maintains its own wall-clock cursor and applies the
+    // event when the cursor reaches that sample position, splitting the render
+    // slice as needed. This eliminates the residual ~1.5 ms render-quantum jitter
+    // even when the upstream scheduler thread fires a couple of milliseconds early
+    // or late.
+
+    public void noteOnAt(int channel, int note, int velocity, long nanos) {
+        if (closed) return;
+        engine.noteOnAt(channel, note, velocity, nanos);
+    }
+
+    public void noteOffAt(int channel, int note, long nanos) {
+        if (closed) return;
+        engine.noteOffAt(channel, note, nanos);
+    }
+
+    public void programChangeAt(int channel, int program, long nanos) {
+        if (closed) return;
+        engine.programChangeAt(channel, program, nanos);
+    }
+
+    public void pitchBendAt(int channel, int value, long nanos) {
+        if (closed) return;
+        engine.pitchBendAt(channel, value, nanos);
+    }
+
+    public void controlChangeAt(int channel, int controller, int value, long nanos) {
+        if (closed) return;
+        engine.controlChangeAt(channel, controller, value, nanos);
+    }
+
     public void allNotesOff() {
         if (closed) {
             return;
