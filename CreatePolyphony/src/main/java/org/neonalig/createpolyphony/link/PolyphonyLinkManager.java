@@ -82,6 +82,8 @@ public final class PolyphonyLinkManager {
     private static final Map<LinkKey, Map<ActiveNoteKey, UUID>> ACTIVE_NOTE_OWNERS = new HashMap<>();
     /** Last observed ProgramChange per tracker/channel, even while no players are linked. */
     private static final Map<LinkKey, int[]> CHANNEL_PROGRAM_SNAPSHOT = new HashMap<>();
+    /** Per-tracker guard window that drops delayed NoteOn events immediately after transport stop. */
+    private static final Map<LinkKey, Long> TRACKER_STOP_SUPPRESSION_UNTIL = new HashMap<>();
     /** Expiration state for transient automation holders (deployer interactions, depot/ground stack targets). */
     private static final Map<UUID, TransientHolderState> TRANSIENT_HOLDER_EXPIRY = new HashMap<>();
 
@@ -102,6 +104,7 @@ public final class PolyphonyLinkManager {
      */
     private static final int AUTOMATION_TTL_CONTINUOUS_TICKS = 20 * 60;
     private static final int AUTOMATION_TTL_INTERACTION_TICKS = 4;
+    private static final int TRACKER_STOP_SUPPRESSION_TICKS = 3;
 
     private PolyphonyLinkManager() {}
 
@@ -155,6 +158,7 @@ public final class PolyphonyLinkManager {
     /** Called from level ticks: refresh mob holders and retire transient automation holders. */
     public static void onLevelTick(ServerLevel level) {
         pruneExpiredTransientHolders(level);
+        pruneExpiredStopSuppression(level);
         long gameTime = level.getGameTime();
         if (gameTime % MOB_SYNC_INTERVAL_TICKS != 0) return;
         syncMobHolders(level);
@@ -233,6 +237,7 @@ public final class PolyphonyLinkManager {
      */
     public static void onTrackerStopped(ServerLevel level, BlockPos pos) {
         LinkKey key = LinkKey.of(level, pos);
+        TRACKER_STOP_SUPPRESSION_UNTIL.put(key, currentServerTick(level.getServer()) + TRACKER_STOP_SUPPRESSION_TICKS);
         Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
 
@@ -289,6 +294,11 @@ public final class PolyphonyLinkManager {
         int velocity = data2 & 0x7F;
         boolean noteOff = command == 0x80 || (command == 0x90 && velocity == 0);
 
+        if (!noteOff && isPostStopNoteOnSuppressed(level, key, command, velocity)) {
+            debugRoute("drop:post-stop-note-on", level, pos, status, data1, data2, null);
+            return;
+        }
+
         // Service tracked NoteOffs BEFORE the link-existence check so that notes
         // started by automation holders (deployers etc.) are properly stopped even
         // after their TTL has expired and their link participation has been removed.
@@ -301,6 +311,12 @@ public final class PolyphonyLinkManager {
                 } else {
                     debugRoute("drop:tracked-owner-missing", level, pos, status, data1, data2, recordedOwner);
                 }
+                return;
+            }
+            // Optimization: once no tracked notes remain on this tracker, ignore
+            // unmatched NoteOff noise until a new NoteOn is tracked again.
+            if (!hasTrackedNotes(key)) {
+                debugRoute("drop:untracked-note-off", level, pos, status, data1, data2, null);
                 return;
             }
         }
@@ -591,6 +607,11 @@ public final class PolyphonyLinkManager {
         return owner;
     }
 
+    private static boolean hasTrackedNotes(LinkKey key) {
+        Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
+        return byNote != null && !byNote.isEmpty();
+    }
+
     private static void forceStopNotesOwnedBy(@Nullable ServerLevel level, LinkKey key, UUID holderId) {
         Map<ActiveNoteKey, UUID> byNote = ACTIVE_NOTE_OWNERS.get(key);
         if (byNote == null || byNote.isEmpty()) return;
@@ -629,6 +650,7 @@ public final class PolyphonyLinkManager {
                         LINKS.remove(key);
                         ACTIVE_NOTE_OWNERS.remove(key);
                         CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+                        TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
                     }
                 }
             }
@@ -672,6 +694,7 @@ public final class PolyphonyLinkManager {
                 LINKS.remove(key);
                 ACTIVE_NOTE_OWNERS.remove(key);
                 CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+                TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
             }
         }
     }
@@ -688,6 +711,14 @@ public final class PolyphonyLinkManager {
             // will arrive from the MIDI sequencer and route correctly via consumeTrackedOwner.
             removeHolderAssignmentOnly(holderId);
         }
+    }
+
+    private static void pruneExpiredStopSuppression(ServerLevel level) {
+        if (TRACKER_STOP_SUPPRESSION_UNTIL.isEmpty()) return;
+        long now = currentServerTick(level.getServer());
+        String levelPath = level.dimension().location().toString();
+        TRACKER_STOP_SUPPRESSION_UNTIL.entrySet().removeIf(entry ->
+            levelPath.equals(entry.getKey().levelPath()) && entry.getValue() <= now);
     }
 
     /**
@@ -708,8 +739,21 @@ public final class PolyphonyLinkManager {
                 // arrive after the link goes empty still need to route to their owner
                 // (via consumeTrackedOwner in dispatchNote) to stop client synth voices.
                 CHANNEL_PROGRAM_SNAPSHOT.remove(key);
+                TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
             }
         }
+    }
+
+    private static boolean isPostStopNoteOnSuppressed(ServerLevel level, LinkKey key, int command, int velocity) {
+        if ((command & 0xF0) != 0x90 || (velocity & 0x7F) == 0) return false;
+        Long until = TRACKER_STOP_SUPPRESSION_UNTIL.get(key);
+        if (until == null) return false;
+        long now = currentServerTick(level.getServer());
+        if (now >= until) {
+            TRACKER_STOP_SUPPRESSION_UNTIL.remove(key);
+            return false;
+        }
+        return true;
     }
 
     private static void syncMobHolders(ServerLevel level) {
