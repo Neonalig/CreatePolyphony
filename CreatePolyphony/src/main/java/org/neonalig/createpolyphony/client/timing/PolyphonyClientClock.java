@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.client.timing;
+package org.neonalig.createpolyphony.client.timing;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;

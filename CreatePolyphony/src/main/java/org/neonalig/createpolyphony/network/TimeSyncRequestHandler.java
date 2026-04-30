@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.network;
+package org.neonalig.createpolyphony.network;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;

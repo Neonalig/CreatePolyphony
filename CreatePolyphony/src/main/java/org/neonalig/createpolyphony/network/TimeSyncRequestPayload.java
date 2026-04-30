@@ -1,4 +1,4 @@
-﻿package org.neonalig.createpolyphony.network;
+package org.neonalig.createpolyphony.network;
 
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
