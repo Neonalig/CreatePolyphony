@@ -12,14 +12,13 @@ public enum SampleType {
 
     private final int value;
 
+    @SuppressWarnings("unused")
     SampleType(int value) {
         this.value = value;
     }
 
-    public int value() {
-        return value;
-    }
 
+    @SuppressWarnings("unused")
     public static SampleType fromValue(int value) {
         for (SampleType type : values()) {
             if (type.value == value) {

@@ -18,7 +18,7 @@ import org.neonalig.createpolyphony.client.sound.SoundFontManager;
  * already open (because that screen draws its own bar). It appears near
  * the top-centre of the screen so it doesn't obscure gameplay UI.</p>
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class SoundFontLoadingHudOverlay {
 

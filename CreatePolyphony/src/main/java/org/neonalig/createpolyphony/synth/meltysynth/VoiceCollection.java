@@ -1,5 +1,7 @@
 package org.neonalig.createpolyphony.synth.meltysynth;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -30,6 +32,10 @@ final class VoiceCollection implements Iterable<Voice> {
             activeVoiceCount++;
             return free;
         }
+        return selectLowestPriorityCandidate();
+    }
+
+    private Voice selectLowestPriorityCandidate() {
         Voice candidate = null;
         float lowestPriority = Float.MAX_VALUE;
         for (int i = 0; i < activeVoiceCount; i++) {
@@ -66,7 +72,7 @@ final class VoiceCollection implements Iterable<Voice> {
     int activeVoiceCount() { return activeVoiceCount; }
 
     @Override
-    public Iterator<Voice> iterator() {
+    public @NotNull Iterator<Voice> iterator() {
         return new Iterator<>() {
             private int index;
 

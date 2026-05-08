@@ -20,14 +20,12 @@ final class Reverb {
     private final AllPassFilter[] apfsR;
 
     private float gain;
-    private float roomSize;
-    private float roomSize1;
-    private float damp;
-    private float damp1;
-    private float wet;
+    private final float roomSize;
+    private final float damp;
+    private final float wet;
     private float wet1;
     private float wet2;
-    private float width;
+    private final float width;
 
     Reverb(int sampleRate) {
         cfsL = new CombFilter[] {
@@ -62,12 +60,13 @@ final class Reverb {
             new AllPassFilter(scaleTuning(sampleRate, 341 + STEREO_SPREAD)),
             new AllPassFilter(scaleTuning(sampleRate, 225 + STEREO_SPREAD))
         };
-        for (AllPassFilter apf : apfsL) apf.feedback(0.5F);
-        for (AllPassFilter apf : apfsR) apf.feedback(0.5F);
-        wet(INITIAL_WET);
-        roomSize(INITIAL_ROOM);
-        damp(INITIAL_DAMP);
-        width(INITIAL_WIDTH);
+        for (AllPassFilter apf : apfsL) apf.setDefaultFeedback();
+        for (AllPassFilter apf : apfsR) apf.setDefaultFeedback();
+        wet = INITIAL_WET * SCALE_WET;
+        roomSize = INITIAL_ROOM * SCALE_ROOM + OFFSET_ROOM;
+        damp = INITIAL_DAMP * SCALE_DAMP;
+        width = INITIAL_WIDTH;
+        update();
     }
 
     private int scaleTuning(int sampleRate, int tuning) {
@@ -101,28 +100,20 @@ final class Reverb {
     private void update() {
         wet1 = wet * (width / 2F + 0.5F);
         wet2 = wet * ((1F - width) / 2F);
-        roomSize1 = roomSize;
-        damp1 = damp;
+        float roomSizeValue = roomSize;
+        float dampValue = damp;
         gain = FIXED_GAIN;
         for (CombFilter cf : cfsL) {
-            cf.feedback(roomSize1);
-            cf.damp(damp1);
+            cf.feedback(roomSizeValue);
+            cf.damp(dampValue);
         }
         for (CombFilter cf : cfsR) {
-            cf.feedback(roomSize1);
-            cf.damp(damp1);
+            cf.feedback(roomSizeValue);
+            cf.damp(dampValue);
         }
     }
 
     float inputGain() { return gain; }
-    float roomSize() { return (roomSize - OFFSET_ROOM) / SCALE_ROOM; }
-    void roomSize(float value) { roomSize = value * SCALE_ROOM + OFFSET_ROOM; update(); }
-    float damp() { return damp / SCALE_DAMP; }
-    void damp(float value) { damp = value * SCALE_DAMP; update(); }
-    float wet() { return wet / SCALE_WET; }
-    void wet(float value) { wet = value * SCALE_WET; update(); }
-    float width() { return width; }
-    void width(float value) { width = value; update(); }
 
     private static final class CombFilter {
         private final float[] buffer;
@@ -200,7 +191,7 @@ final class Reverb {
             }
         }
 
-        private void feedback(float value) { feedback = value; }
+        private void setDefaultFeedback() { feedback = 0.5F; }
     }
 }
 

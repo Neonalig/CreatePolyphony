@@ -2,7 +2,6 @@ package org.neonalig.createpolyphony.client.timing;
 
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
-import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.network.TimeSyncResponsePayload;
 
 /**
@@ -100,11 +99,6 @@ public final class PolyphonyClientClock {
             offsetNanos = ewmaOffsetNanos;
         }
         primed = true;
-
-        if (CreatePolyphony.LOGGER.isDebugEnabled()) {
-            CreatePolyphony.LOGGER.debug("clock-sync rtt={}us offset={}us bestRtt={}us",
-                rtt / 1_000L, offsetNanos / 1_000L, bestRttNanos / 1_000L);
-        }
     }
 }
 

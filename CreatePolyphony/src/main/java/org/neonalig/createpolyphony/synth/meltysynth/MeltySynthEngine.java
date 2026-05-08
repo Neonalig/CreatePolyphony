@@ -44,10 +44,9 @@ public final class MeltySynthEngine {
 
     private final SynthSettings settings;
 
-    private final MidiEventQueue midiQueue = new MidiEventQueue(8192);
+    private final MidiEventQueue midiQueue = new MidiEventQueue();
     private final int[] midiEventScratch = new int[4];
 
-    private volatile MeltySoundFont soundFont;
     private volatile Synthesizer synthesizer;
     private volatile boolean soundFontLoaded;
     private volatile boolean closed;
@@ -66,61 +65,26 @@ public final class MeltySynthEngine {
         this.settings = settings;
     }
 
-    public SynthSettings settings() {
-        return settings;
-    }
-
     public void loadSoundFont(MeltySoundFont soundFont) {
         SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
         int configuredFrames = settings.pumpChunkBytes() / Math.max(1, settings.frameSize());
-        int blockFrames = Math.max(16, Math.min(256, Math.min(TARGET_SYNTH_BLOCK_FRAMES, Math.max(16, configuredFrames))));
+        int blockFrames = Math.clamp(Math.min(TARGET_SYNTH_BLOCK_FRAMES, configuredFrames), 16, 256);
         synthSettings.blockSize(blockFrames);
-        synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
+        synthSettings.maximumPolyphony(Math.clamp(settings.maxVoices(), 8, 256));
         synthSettings.enableReverbAndChorus(true);
-        Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
-        this.soundFont = soundFont;
-        this.synthesizer = newSynth;
+        this.synthesizer = new Synthesizer(soundFont.soundFont(), synthSettings);
         this.soundFontLoaded = true;
         allNotesOff();
     }
 
     public void unloadSoundFont() {
-        this.soundFont = null;
         this.synthesizer = null;
         this.soundFontLoaded = false;
         allNotesOff();
     }
 
-    public MeltySoundFont soundFont() {
-        return soundFont;
-    }
-
     // ---- MIDI entry points (untimed = legacy "apply immediately") --------------------------
 
-    public void noteOn(int channel, int note, int velocity) {
-        if (closed) return;
-        midiQueue.offer(EVT_NOTE_ON, channel & 0x0F, note & 0x7F, velocity & 0x7F);
-    }
-
-    public void noteOff(int channel, int note) {
-        if (closed) return;
-        midiQueue.offer(EVT_NOTE_OFF, channel & 0x0F, note & 0x7F, 0);
-    }
-
-    public void programChange(int channel, int program) {
-        if (closed) return;
-        midiQueue.offer(EVT_PROGRAM, channel & 0x0F, program & 0x7F, 0);
-    }
-
-    public void pitchBend(int channel, int value) {
-        if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.max(0, Math.min(16383, value)), 0);
-    }
-
-    public void controlChange(int channel, int controller, int value) {
-        if (closed) return;
-        midiQueue.offer(EVT_CC, channel & 0x0F, controller & 0x7F, value & 0x7F);
-    }
 
     public void allNotesOff() {
         if (closed) return;
@@ -144,24 +108,11 @@ public final class MeltySynthEngine {
         midiQueue.offer(EVT_PROGRAM, channel & 0x0F, program & 0x7F, 0, nanos);
     }
 
-    public void pitchBendAt(int channel, int value, long nanos) {
-        if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.max(0, Math.min(16383, value)), 0, nanos);
-    }
 
-    public void controlChangeAt(int channel, int controller, int value, long nanos) {
-        if (closed) return;
-        midiQueue.offer(EVT_CC, channel & 0x0F, controller & 0x7F, value & 0x7F, nanos);
-    }
-
-    public boolean isClosed() {
-        return closed;
-    }
 
     public void close() {
         closed = true;
         synthesizer = null;
-        soundFont = null;
         soundFontLoaded = false;
         midiQueue.clear();
     }
@@ -198,7 +149,7 @@ public final class MeltySynthEngine {
             blockClockAnchored = true;
         }
 
-        int maxSlice = Math.max(1, Math.min(RENDER_SLICE_FRAMES, frames));
+        int maxSlice = Math.clamp(frames, 1, RENDER_SLICE_FRAMES);
         float[] left = new float[maxSlice];
         float[] right = new float[maxSlice];
 
@@ -223,12 +174,11 @@ public final class MeltySynthEngine {
                 } else {
                     long deltaNanos = headNanos - blockStartNanos;
                     long offsetFrames = (long) ((double) deltaNanos / nanosPerFrame);
-                    int boundedOffset = offsetFrames < 0
+                    splitOffset = offsetFrames < 0
                         ? 0
                         : (offsetFrames > sliceFrames - producedInSlice
                             ? sliceFrames - producedInSlice
                             : (int) offsetFrames);
-                    splitOffset = boundedOffset;
                 }
 
                 // Render the audio strictly preceding the event, if any.
@@ -319,7 +269,7 @@ public final class MeltySynthEngine {
 
 
     private static short toPcm16(float sample) {
-        float clamped = Math.max(-1F, Math.min(1F, sample));
+        float clamped = Math.clamp(sample, -1F, 1F);
         return (short) Math.round(clamped * Short.MAX_VALUE);
     }
 }

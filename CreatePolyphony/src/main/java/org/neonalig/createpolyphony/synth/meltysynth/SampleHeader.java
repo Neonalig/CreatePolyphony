@@ -14,8 +14,6 @@ public final class SampleHeader {
     private final int sampleRate;
     private final int originalPitch;
     private final int pitchCorrection;
-    private final int link;
-    private final SampleType type;
 
     private SampleHeader() {
         name = "Default";
@@ -26,8 +24,6 @@ public final class SampleHeader {
         sampleRate = 0;
         originalPitch = 60;
         pitchCorrection = 0;
-        link = 0;
-        type = SampleType.MONO;
     }
 
     private SampleHeader(DataInput in) throws IOException {
@@ -39,8 +35,8 @@ public final class SampleHeader {
         sampleRate = BinaryReaderEx.readInt32LE(in);
         originalPitch = in.readUnsignedByte();
         pitchCorrection = (byte) in.readUnsignedByte();
-        link = BinaryReaderEx.readInt16LE(in);
-        type = SampleType.fromValue(BinaryReaderEx.readInt16LE(in));
+        BinaryReaderEx.readInt16LE(in); // link
+        BinaryReaderEx.readInt16LE(in); // type – not used by the synth
     }
 
     static SampleHeader[] readFromChunk(DataInput in, int size) throws IOException {
@@ -69,7 +65,5 @@ public final class SampleHeader {
     public int sampleRate() { return sampleRate; }
     public int originalPitch() { return originalPitch; }
     public int pitchCorrection() { return pitchCorrection; }
-    public int link() { return link; }
-    public SampleType type() { return type; }
 }
 

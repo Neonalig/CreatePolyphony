@@ -1,8 +1,9 @@
 package org.neonalig.createpolyphony.mixin;
 
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
+import com.simibubi.create.content.kinetics.deployer.DeployerHandler;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
@@ -20,20 +21,22 @@ import java.util.UUID;
  * Hooks Create deployer activations (stationary and contraption) so automation
  * holders can participate in tracker link assignment.
  */
-@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerHandler", remap = false)
+@Mixin(value = DeployerHandler.class, remap = false)
 public abstract class DeployerHandlerMixin {
 
+    @SuppressWarnings("unused")
     @Inject(
         method = "activate(Lcom/simibubi/create/content/kinetics/deployer/DeployerFakePlayer;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/Vec3;Lcom/simibubi/create/content/kinetics/deployer/DeployerBlockEntity$Mode;)V",
         at = @At("TAIL")
     )
-    private static void createpolyphony$onActivate(DeployerFakePlayer fakePlayer,
-                                                    Vec3 center,
-                                                    BlockPos targetPos,
-                                                    Vec3 movementVector,
+    private static void createpolyphony$onActivate(DeployerFakePlayer player,
+                                                    Vec3 vec,
+                                                    BlockPos clickedPos,
+                                                    Vec3 extensionVector,
                                                     @Coerce Object mode,
                                                     CallbackInfo ci) {
-        if (!(fakePlayer.level() instanceof ServerLevel level)) return;
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
 
         // DeployerFakePlayer.getUUID() returns the *owner player's* UUID, which is shared
         // by every deployer they placed.  If two deployers are on the same contraption their
@@ -44,26 +47,26 @@ public abstract class DeployerHandlerMixin {
         // with the Java identity hash of this specific fake player object.
         // Each DeployerBlockEntity holds a single fake player instance (lazy-created once),
         // so System.identityHashCode is stable for the lifetime of the deployer block entity.
-        UUID ownerId = fakePlayer.getUUID();
+        UUID ownerId = player.getUUID();
         UUID holderId = new UUID(
             ownerId.getMostSignificantBits(),
-            (long) System.identityHashCode(fakePlayer) & 0xFFFFFFFFL
+            (long) System.identityHashCode(player) & 0xFFFFFFFFL
         );
 
         PolyphonyLinkManager.registerAutomationActivation(
-            level,
+            player.serverLevel(),
             holderId,
-            fakePlayer.getMainHandItem(),
-            targetPos,
-            center
+            player.getMainHandItem(),
+            clickedPos,
+            vec
         );
 
-        if (!(fakePlayer.getMainHandItem().getItem() instanceof InstrumentItem)) {
+        if (!(player.getMainHandItem().getItem() instanceof InstrumentItem)) {
             return;
         }
-        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerId);
+        ServerPlayer owner = server.getPlayerList().getPlayer(ownerId);
         if (owner == null) return;
-        PolyphonyAdvancementGrants.grantForHeldInstrument(owner, fakePlayer.getMainHandItem());
+        PolyphonyAdvancementGrants.grantForHeldInstrument(owner, player.getMainHandItem());
         PolyphonyAdvancementGrants.grantDeployerEncore(owner);
     }
 }

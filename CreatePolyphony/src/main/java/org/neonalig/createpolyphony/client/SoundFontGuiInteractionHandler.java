@@ -15,7 +15,7 @@ import org.neonalig.createpolyphony.instrument.InstrumentItem;
 /**
  * Client-only interaction hook for opening the soundfont picker screen.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class SoundFontGuiInteractionHandler {
 

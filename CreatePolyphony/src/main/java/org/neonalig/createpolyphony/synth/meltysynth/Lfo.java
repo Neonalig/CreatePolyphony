@@ -14,15 +14,14 @@ final class Lfo {
     }
 
     void start(float delay, float frequency) {
+        value = 0F;
         if (frequency > 1.0E-3F) {
             active = true;
             this.delay = delay;
             this.period = 1.0 / frequency;
             processedSampleCount = 0;
-            value = 0F;
         } else {
             active = false;
-            value = 0F;
         }
     }
 
@@ -36,13 +35,15 @@ final class Lfo {
             value = 0F;
         } else {
             double phase = ((currentTime - delay) % period) / period;
+            double shape;
             if (phase < 0.25) {
-                value = (float) (4 * phase);
+                shape = phase;
             } else if (phase < 0.75) {
-                value = (float) (4 * (0.5 - phase));
+                shape = 0.5 - phase;
             } else {
-                value = (float) (4 * (phase - 1.0));
+                shape = phase - 1.0;
             }
+            value = (float) (4 * shape);
         }
     }
 

@@ -1,7 +1,7 @@
 package org.neonalig.createpolyphony.mixin;
 
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -35,17 +35,19 @@ import java.util.UUID;
  *       expiry before any cleanup runs.</li>
  * </ul>
  */
-@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity", remap = false)
+@Mixin(value = DeployerBlockEntity.class, remap = false)
 public abstract class DeployerBlockEntityMixin {
 
     @Shadow protected DeployerFakePlayer player;
     @Shadow protected boolean redstoneLocked;
 
+    @SuppressWarnings("unused")
     @Inject(method = "tick()V", at = @At("HEAD"))
     private void createpolyphony$heartbeat(CallbackInfo ci) {
         BlockEntity be = (BlockEntity) (Object) this;
         Level level = be.getLevel();
         if (!(level instanceof ServerLevel serverLevel)) return;
+        if (!(be instanceof DeployerBlockEntity deployer)) return;
 
         DeployerFakePlayer fakePlayer = this.player;
         if (fakePlayer == null) return;
@@ -73,7 +75,7 @@ public abstract class DeployerBlockEntityMixin {
             return;
         }
 
-        float speed = ((KineticBlockEntity) (Object) this).getSpeed();
+        float speed = deployer.getSpeed();
         if (this.redstoneLocked || Math.abs(speed) < 1.0e-6F) {
             PolyphonyLinkManager.unregisterAutomationHolder(serverLevel, holderId);
             return;

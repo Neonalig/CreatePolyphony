@@ -15,7 +15,7 @@ import org.neonalig.createpolyphony.link.InstrumentLinkData;
 /**
  * Client-only cosmetic rename for the One Man Band item.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class OneManBandNameHandler {
 
@@ -43,7 +43,7 @@ public final class OneManBandNameHandler {
             ? base
             : Component.translatable("item.createpolyphony.linked_name", base, target.coords());
 
-        event.getToolTip().set(0, displayName.withStyle(event.getToolTip().get(0).getStyle()));
+        event.getToolTip().set(0, displayName.withStyle(event.getToolTip().getFirst().getStyle()));
     }
 }
 

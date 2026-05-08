@@ -25,7 +25,7 @@ import static net.minecraft.commands.Commands.literal;
 /**
  * Server-side commands for link management and admin safety controls.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME)
 public final class PolyphonyServerCommands {
 
@@ -38,7 +38,10 @@ public final class PolyphonyServerCommands {
                 .executes(ctx -> unlinkCurrent(ctx.getSource())))
             .then(literal("panic")
                 .requires(source -> source.hasPermission(2))
-                .executes(ctx -> panicAll(ctx.getSource()))));
+                .executes(ctx -> {
+                    panicAll(ctx.getSource());
+                    return 1;
+                })));
     }
 
     private static int unlinkCurrent(CommandSourceStack source) throws CommandSyntaxException {
@@ -52,7 +55,7 @@ public final class PolyphonyServerCommands {
         return 0;
     }
 
-    private static int panicAll(CommandSourceStack source) {
+    private static void panicAll(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         Map<PolyphonyLinkManager.LinkKey, PolyphonyLink> snapshot = PolyphonyLinkManager.snapshot();
         Set<UUID> recipients = new HashSet<>();
@@ -74,7 +77,6 @@ public final class PolyphonyServerCommands {
 
         String msg = "Panic broadcast sent to " + count + " linked players.";
         source.sendSuccess(() -> Component.literal(msg), true);
-        return 1;
     }
 }
 

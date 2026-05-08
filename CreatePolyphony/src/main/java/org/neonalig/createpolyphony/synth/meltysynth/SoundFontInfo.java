@@ -4,17 +4,9 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 
 public final class SoundFontInfo {
-    private SoundFontVersion version = new SoundFontVersion((short) 0, (short) 0);
-    private String targetSoundEngine = "";
     private String bankName = "";
-    private String romName = "";
-    private SoundFontVersion romVersion = new SoundFontVersion((short) 0, (short) 0);
-    private String creationDate = "";
-    private String author = "";
-    private String targetProduct = "";
-    private String copyright = "";
-    private String comments = "";
-    private String tools = "";
+    private short versionMajor;
+    private short versionMinor;
 
     SoundFontInfo(RandomAccessFile reader) throws IOException {
         String chunkId = BinaryReaderEx.readFourCC(reader);
@@ -29,19 +21,19 @@ public final class SoundFontInfo {
         while (reader.getFilePointer() < end) {
             String id = BinaryReaderEx.readFourCC(reader);
             int size = BinaryReaderEx.readInt32LE(reader);
-            switch (id) {
-                case "ifil" -> version = new SoundFontVersion((short) BinaryReaderEx.readInt16LE(reader), (short) BinaryReaderEx.readInt16LE(reader));
-                case "isng" -> targetSoundEngine = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "INAM" -> bankName = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "irom" -> romName = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "iver" -> romVersion = new SoundFontVersion((short) BinaryReaderEx.readInt16LE(reader), (short) BinaryReaderEx.readInt16LE(reader));
-                case "ICRD" -> creationDate = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "IENG" -> author = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "IPRD" -> targetProduct = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "ICOP" -> copyright = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "ICMT" -> comments = BinaryReaderEx.readFixedLengthString(reader, size);
-                case "ISFT" -> tools = BinaryReaderEx.readFixedLengthString(reader, size);
-                default -> throw new IOException("The INFO list contains an unknown ID '" + id + "'.");
+            if ("ifil".equals(id)) {
+                versionMajor = (short) BinaryReaderEx.readInt16LE(reader);
+                versionMinor = (short) BinaryReaderEx.readInt16LE(reader);
+                int remaining = size - 4;
+                if (remaining > 0) {
+                    reader.skipBytes(remaining);
+                }
+            } else if ("INAM".equals(id)) {
+                bankName = BinaryReaderEx.readFixedLengthString(reader, size);
+            } else {
+                // All other INFO sub-chunks (version, sound engine, ROM info, author, etc.)
+                // are not used by the synthesiser – skip the bytes to maintain correct offset.
+                reader.skipBytes(size);
             }
             if ((size & 1) != 0) {
                 reader.skipBytes(1);
@@ -52,16 +44,7 @@ public final class SoundFontInfo {
     @Override
     public String toString() { return bankName; }
 
-    public SoundFontVersion version() { return version; }
-    public String targetSoundEngine() { return targetSoundEngine; }
     public String bankName() { return bankName; }
-    public String romName() { return romName; }
-    public SoundFontVersion romVersion() { return romVersion; }
-    public String creationDate() { return creationDate; }
-    public String author() { return author; }
-    public String targetProduct() { return targetProduct; }
-    public String copyright() { return copyright; }
-    public String comments() { return comments; }
-    public String tools() { return tools; }
+    @SuppressWarnings("unused")
+    public String version() { return versionMajor + "." + versionMinor; }
 }
-

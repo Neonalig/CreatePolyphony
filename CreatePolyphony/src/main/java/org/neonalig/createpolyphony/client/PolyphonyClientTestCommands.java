@@ -21,7 +21,7 @@ import static net.minecraft.commands.Commands.literal;
 /**
  * Client-side debug/testing commands for soundfont UI and synth config.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class PolyphonyClientTestCommands {
 
@@ -49,11 +49,17 @@ public final class PolyphonyClientTestCommands {
                     .then(argument("value", IntegerArgumentType.integer(500, 60_000))
                         .executes(ctx -> updateConfig("clockSyncIntervalMs", IntegerArgumentType.getInteger(ctx, "value"))))))
             .then(literal("timing")
-                .executes(ctx -> reportTiming()))
+                .executes(ctx -> {
+                    reportTiming();
+                    return 1;
+                }))
             .then(literal("reloadSynth")
                 .executes(ctx -> reloadSynth()))
             .then(literal("panic")
-                .executes(ctx -> panic())));
+                .executes(ctx -> {
+                    panic();
+                    return 1;
+                })));
     }
 
     private static int openGui() {
@@ -64,7 +70,7 @@ public final class PolyphonyClientTestCommands {
         }
         Minecraft mc = Minecraft.getInstance();
         mc.execute(() -> mc.setScreen(new SoundFontPickerScreen(manager)));
-        if (!manager.synthesisAvailable()) {
+        if (manager.synthesisUnavailable()) {
             tell("Opened SoundFont settings screen (synth backend unavailable; playback currently muted).");
         } else {
             tell("Opened SoundFont settings screen.");
@@ -96,7 +102,7 @@ public final class PolyphonyClientTestCommands {
         return 1;
     }
 
-    private static int reportTiming() {
+    private static void reportTiming() {
         long offsetUs = PolyphonyClientClock.currentOffsetNanos() / 1_000L;
         long bestRttUs = PolyphonyClientClock.currentBestRttNanos();
         bestRttUs = bestRttUs < 0 ? -1 : bestRttUs / 1_000L;
@@ -106,7 +112,6 @@ public final class PolyphonyClientTestCommands {
             "timing: primed=%s offset=%dus bestRtt=%s pending=%d lookAhead=%dms",
             primed, offsetUs, bestRttUs < 0 ? "n/a" : (bestRttUs + "us"),
             pending, Config.schedulingDelayMs()));
-        return 1;
     }
 
     private static int reloadSynth() {
@@ -120,7 +125,7 @@ public final class PolyphonyClientTestCommands {
             tell("Failed to re-create SoundFont manager after reload.");
             return 0;
         }
-        if (!reloaded.synthesisAvailable()) {
+        if (reloaded.synthesisUnavailable()) {
             tell("Manager reloaded, but synth backend is still unavailable.");
         } else {
             tell("Synth reloaded from current config values.");
@@ -128,11 +133,10 @@ public final class PolyphonyClientTestCommands {
         return 1;
     }
 
-    private static int panic() {
+    private static void panic() {
         PolyphonyEventScheduler.flushAll();
         PolyphonyClientNoteHandler.panic();
         tell("Panic triggered: stopped all active notes.");
-        return 1;
     }
 
     private static void tell(String message) {

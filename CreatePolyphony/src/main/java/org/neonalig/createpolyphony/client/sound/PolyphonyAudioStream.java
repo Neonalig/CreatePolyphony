@@ -3,6 +3,7 @@ package org.neonalig.createpolyphony.client.sound;
 import net.minecraft.client.sounds.AudioStream;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.jetbrains.annotations.NotNull;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import javax.sound.sampled.AudioFormat;
@@ -88,18 +89,13 @@ public final class PolyphonyAudioStream implements AudioStream {
         this.gainApplicable = format.getSampleSizeInBits() == 16 && !format.isBigEndian();
     }
 
-    /** Backward-compatible constructor: unity gain (no amplification). */
-    public PolyphonyAudioStream(PolyphonySynthesizer synth) {
-        this(synth, () -> 1.0D);
-    }
-
     @Override
-    public AudioFormat getFormat() {
+    public @NotNull AudioFormat getFormat() {
         return format;
     }
 
     @Override
-    public ByteBuffer read(int size) throws IOException {
+    public @NotNull ByteBuffer read(int size) throws IOException {
         int frame = synth.settings().frameSize();
         int boundedSize = Math.min(size, scratch.length);
         int request = Math.max(frame, boundedSize);
@@ -120,7 +116,7 @@ public final class PolyphonyAudioStream implements AudioStream {
             if (gainApplicable) {
                 double gain = gainSupplier.getAsDouble();
                 if (Double.isFinite(gain) && Math.abs(gain - 1.0D) > 1.0e-3D && gain >= 0.0D) {
-                    applyGain16LE(scratch, 0, request, gain);
+                    applyGain16LE(scratch, request, gain);
                 }
             }
         } else {
@@ -139,9 +135,9 @@ public final class PolyphonyAudioStream implements AudioStream {
      * place, hard-clipping to the int16 range so amplification beyond unity
      * does not wrap negative.
      */
-    private static void applyGain16LE(byte[] buf, int off, int len, double gain) {
-        int end = off + (len & ~1); // 2-byte aligned
-        for (int i = off; i < end; i += 2) {
+    private static void applyGain16LE(byte[] buf, int len, double gain) {
+        int end = len & ~1; // 2-byte aligned
+        for (int i = 0; i < end; i += 2) {
             int lo = buf[i] & 0xFF;
             int hi = buf[i + 1]; // signed sign-extends
             int sample = (hi << 8) | lo;

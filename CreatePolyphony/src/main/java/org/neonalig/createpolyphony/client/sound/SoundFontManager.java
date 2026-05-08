@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -81,8 +82,6 @@ import java.util.stream.Stream;
  *       snapshot copy.</li>
  *   <li>{@link #setActive(String)} should be called from the client main
  *       thread (it triggers OpenAL state changes).</li>
- *   <li>{@link #activeSynth()} is the network handler's hot path - lock
- *       free and uses a volatile field for visibility.</li>
  * </ul>
  */
 @OnlyIn(Dist.CLIENT)
@@ -166,33 +165,31 @@ public final class SoundFontManager {
                     "Sound synthesis backend unavailable; UI and soundfont selection will stay available but note playback is disabled.",
                     synthError);
             }
-            SoundFontManager mgr = new SoundFontManager(dir, synth);
-
-            // Wire the note handler to query us for the synth.
-            PolyphonyClientNoteHandler.setSynthSupplier(mgr::activeSynth);
-            // Whenever the active soundfont (re)loads, kick the note handler's
-            // background prewarmer so a small pool of ready-to-go synths is
-            // standing by before the next first-NoteOn arrives. Without this,
-            // equipping a linked instrument mid-song forces a synchronous SF2
-            // parse on the client thread the first time we have to build a
-            // SourceBus for that holder, which manifests as a several-hundred
-            // -ms hitch right when playback starts.
-            mgr.addListener(m -> {
-                if (!m.isLoading() && m.active() != null) {
-                    PolyphonyClientNoteHandler.requestPrewarm();
-                }
-            });
-
-            // Restore last selection, if any.
-            mgr.loadSelectionFromDisk();
-
-            INSTANCE = mgr;
+            INSTANCE = createAndInitialise(dir, synth);
             CreatePolyphony.LOGGER.info("SoundFontManager initialised at {}", dir);
-            return mgr;
+            return INSTANCE;
         } catch (Throwable t) {
             CreatePolyphony.LOGGER.error("Failed to initialise SoundFontManager", t);
             return null;
         }
+    }
+
+    /** Creates, wires listeners, and restores persisted selection. Extracted to keep {@link #get()} readable. */
+    private static SoundFontManager createAndInitialise(Path dir, @Nullable PolyphonySynthesizer synth) throws IOException {
+        SoundFontManager mgr = new SoundFontManager(dir, synth);
+
+        // Whenever the active soundfont (re)loads, kick the note handler's
+        // background prewarmer so a small pool of ready-to-go synths is
+        // standing by before the next first-NoteOn arrives.
+        mgr.addListener(m -> {
+            if (!m.isLoading() && m.active() != null) {
+                PolyphonyClientNoteHandler.requestPrewarm();
+            }
+        });
+
+        // Restore last selection, if any.
+        mgr.loadSelectionFromDisk();
+        return mgr;
     }
 
     /**
@@ -221,11 +218,6 @@ public final class SoundFontManager {
         return activeName;
     }
 
-    /** The synth currently bound to the active soundfont, or {@code null} for "None". */
-    @Nullable
-    public PolyphonySynthesizer activeSynth() {
-        return (activeName == null || loading) ? null : synth;
-    }
 
     public boolean isLoading() {
         return loading;
@@ -245,8 +237,8 @@ public final class SoundFontManager {
         return loadProgressPercent.get() / 100f;
     }
 
-    public boolean synthesisAvailable() {
-        return synth != null;
+    public boolean synthesisUnavailable() {
+        return synth == null;
     }
 
     /** Monotonic generation bumping whenever active selection/load lifecycle changes. */
@@ -345,8 +337,6 @@ public final class SoundFontManager {
             try {
                 synth.loadSoundFont(target.toFile(), loadProgressPercent::set);
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, true, null));
-            } catch (IOException ex) {
-                Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, ex));
             } catch (Throwable t) {
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, t));
             }
@@ -442,7 +432,7 @@ public final class SoundFontManager {
         } catch (IOException ex) {
             CreatePolyphony.LOGGER.warn("Failed to list soundfont directory {}", directory, ex);
         }
-        Collections.sort(found, String.CASE_INSENSITIVE_ORDER);
+        found.sort(String.CASE_INSENSITIVE_ORDER);
         cachedListing = Collections.unmodifiableList(found);
 
         // If our active selection was deleted underneath us, drop it.
@@ -464,7 +454,8 @@ public final class SoundFontManager {
 
     private void persistSelection() {
         try {
-            String content = activeName == null ? "" : activeName;
+            String selected = activeName;
+            String content = selected == null ? "" : selected;
             Files.writeString(selectionFile, content, StandardCharsets.UTF_8);
         } catch (IOException ex) {
             CreatePolyphony.LOGGER.warn("Failed to persist soundfont selection", ex);
@@ -508,13 +499,20 @@ public final class SoundFontManager {
                 return;
             }
 
-            // Debounce: drain any further events that arrive in the next 150 ms before rescanning.
-            try { Thread.sleep(150); } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt(); return;
-            }
-            // Ignore the actual events - we always do a full rescan, which is cheap.
             key.pollEvents();
             key.reset();
+
+            // Debounce: keep draining follow-up keys that arrive shortly after the first one.
+            try {
+                WatchKey extra;
+                while ((extra = watchService.poll(150, TimeUnit.MILLISECONDS)) != null) {
+                    extra.pollEvents();
+                    extra.reset();
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
 
             try {
                 rescanInternal();

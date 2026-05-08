@@ -23,14 +23,19 @@ import java.util.concurrent.locks.LockSupport;
 @OnlyIn(Dist.CLIENT)
 public final class PolyphonyClockSyncDriver {
 
+    private static final long FAILURE_LOG_INTERVAL_NANOS = 30L * 1_000_000_000L;
     private static volatile Thread thread;
     private static volatile boolean running;
+    private static long nextFailureLogAtNanos;
+    private static int suppressedFailureCount;
 
     private PolyphonyClockSyncDriver() {}
 
     public static synchronized void start() {
         if (running) return;
         running = true;
+        nextFailureLogAtNanos = 0L;
+        suppressedFailureCount = 0;
         Thread t = new Thread(PolyphonyClockSyncDriver::run, "CreatePolyphony-ClockSync");
         t.setDaemon(true);
         thread = t;
@@ -65,8 +70,22 @@ public final class PolyphonyClockSyncDriver {
             if (mc.getConnection() == null || !mc.getConnection().getConnection().isConnected()) return;
             PacketDistributor.sendToServer(new TimeSyncRequestPayload(System.nanoTime()));
         } catch (Throwable t) {
-            CreatePolyphony.LOGGER.debug("clock-sync ping failed", t);
+            logPingFailure(t);
         }
+    }
+
+    private static void logPingFailure(Throwable t) {
+        long now = System.nanoTime();
+        if (now >= nextFailureLogAtNanos) {
+            if (suppressedFailureCount > 0) {
+                CreatePolyphony.LOGGER.warn("clock-sync ping failures continued (suppressed {} similar failures)", suppressedFailureCount);
+                suppressedFailureCount = 0;
+            }
+            CreatePolyphony.LOGGER.warn("clock-sync ping failed: {}", t.toString());
+            nextFailureLogAtNanos = now + FAILURE_LOG_INTERVAL_NANOS;
+            return;
+        }
+        suppressedFailureCount++;
     }
 
     private static void sleepMs(long ms) {

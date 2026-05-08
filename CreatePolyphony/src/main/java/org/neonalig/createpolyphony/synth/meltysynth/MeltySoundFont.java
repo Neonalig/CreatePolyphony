@@ -5,17 +5,12 @@ import java.io.IOException;
 import java.util.function.IntConsumer;
 
 public final class MeltySoundFont {
-    private final File sourceFile;
     private final SoundFont soundFont;
 
-    private MeltySoundFont(File sourceFile, SoundFont soundFont) {
-        this.sourceFile = sourceFile;
+    private MeltySoundFont(SoundFont soundFont) {
         this.soundFont = soundFont;
     }
 
-    public File sourceFile() {
-        return sourceFile;
-    }
 
     public int presetCount() {
         return soundFont.presetArray().length;
@@ -33,14 +28,14 @@ public final class MeltySoundFont {
         if (file == null || !file.isFile()) {
             throw new IOException("SoundFont file not found: " + file);
         }
-        return new MeltySoundFont(file, new SoundFont(file));
+        return new MeltySoundFont(new SoundFont(file));
     }
 
     public static MeltySoundFont load(File file, IntConsumer progressCallback) throws IOException {
         if (file == null || !file.isFile()) {
             throw new IOException("SoundFont file not found: " + file);
         }
-        return new MeltySoundFont(file, new SoundFont(file, progressCallback));
+        return new MeltySoundFont(new SoundFont(file, progressCallback));
     }
 
     SoundFont soundFont() {

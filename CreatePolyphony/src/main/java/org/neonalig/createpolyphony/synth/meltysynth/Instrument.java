@@ -41,7 +41,6 @@ public final class Instrument {
 	}
 
 	public String name() { return name; }
-	public InstrumentRegion[] regions() { return regions; }
 	InstrumentRegion[] regionArray() { return regions; }
 }
 

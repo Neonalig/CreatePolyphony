@@ -15,7 +15,7 @@ import java.util.function.IntConsumer;
  * {@code org.neonalig.createpolyphony.synth.meltysynth}. No
  * {@code javax.sound.midi} dependency remains in the render path.</p>
  *
- * <p>The audio thread pulls raw PCM by calling {@link #renderPcm(byte[], int)}.
+ * <p>The audio thread pulls raw PCM by calling {@link #renderPcm(byte[], int, int)}.
  * MIDI events can be submitted from any thread and are applied on the audio
  * thread at block boundaries.</p>
  */
@@ -51,17 +51,19 @@ public final class PolyphonySynthesizer {
     public void loadSoundFont(File sf2File) throws IOException {
         MeltySoundFont bank = MeltySoundFont.load(sf2File);
         engine.loadSoundFont(bank);
-        CreatePolyphony.LOGGER.info(
-            "Loaded soundfont {} ({} presets, {} instruments, {} samples)",
-            sf2File.getName(), bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
+        logSoundFontLoaded(sf2File, bank, "direct");
     }
 
     public void loadSoundFont(File sf2File, IntConsumer progressCallback) throws IOException {
         MeltySoundFont bank = MeltySoundFont.load(sf2File, progressCallback);
         engine.loadSoundFont(bank);
+        logSoundFontLoaded(sf2File, bank, "progress-tracked");
+    }
+
+    private static void logSoundFontLoaded(File sf2File, MeltySoundFont bank, String loadMode) {
         CreatePolyphony.LOGGER.info(
-            "Loaded soundfont {} ({} presets, {} instruments, {} samples)",
-            sf2File.getName(), bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
+            "Loaded soundfont {} via {} load ({} presets, {} instruments, {} samples)",
+            sf2File.getName(), loadMode, bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
     }
 
     /**
@@ -74,41 +76,6 @@ public final class PolyphonySynthesizer {
     }
 
     // ---- MIDI event entry points (thread-safe, callable from network thread) ------------------
-
-    public void programChange(int channel, int program) {
-        if (closed) {
-            return;
-        }
-        engine.programChange(channel, program);
-    }
-
-    public void noteOn(int channel, int note, int velocity) {
-        if (closed) {
-            return;
-        }
-        engine.noteOn(channel, note, velocity);
-    }
-
-    public void noteOff(int channel, int note) {
-        if (closed) {
-            return;
-        }
-        engine.noteOff(channel, note);
-    }
-
-    public void pitchBend(int channel, int value) {
-        if (closed) {
-            return;
-        }
-        engine.pitchBend(channel, value);
-    }
-
-    public void controlChange(int channel, int controller, int value) {
-        if (closed) {
-            return;
-        }
-        engine.controlChange(channel, controller, value);
-    }
 
     // ---- Timed entry points: events apply at exact sample positions inside the synth ---------
     //
@@ -134,16 +101,6 @@ public final class PolyphonySynthesizer {
         engine.programChangeAt(channel, program, nanos);
     }
 
-    public void pitchBendAt(int channel, int value, long nanos) {
-        if (closed) return;
-        engine.pitchBendAt(channel, value, nanos);
-    }
-
-    public void controlChangeAt(int channel, int controller, int value, long nanos) {
-        if (closed) return;
-        engine.controlChangeAt(channel, controller, value, nanos);
-    }
-
     public void allNotesOff() {
         if (closed) {
             return;
@@ -151,9 +108,6 @@ public final class PolyphonySynthesizer {
         engine.allNotesOff();
     }
 
-    public int renderPcm(byte[] out, int requestedBytes) {
-        return renderPcm(out, 0, requestedBytes);
-    }
 
     public int renderPcm(byte[] out, int offset, int requestedBytes) {
         if (closed) {

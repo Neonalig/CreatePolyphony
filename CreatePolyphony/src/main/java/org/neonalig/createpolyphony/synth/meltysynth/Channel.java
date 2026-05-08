@@ -68,8 +68,8 @@ final class Channel {
     void setChorusSend(int value) { chorusSend = (byte) value; }
     void setRpnCoarse(int value) { rpn = (short) ((rpn & 0x7F) | (value << 7)); lastDataType = DataType.RPN; }
     void setRpnFine(int value) { rpn = (short) ((rpn & 0xFF80) | value); lastDataType = DataType.RPN; }
-    void setNrpnCoarse(int value) { lastDataType = DataType.NRPN; }
-    void setNrpnFine(int value) { lastDataType = DataType.NRPN; }
+    void setNrpnCoarse() { lastDataType = DataType.NRPN; }
+    void setNrpnFine() { lastDataType = DataType.NRPN; }
 
     void dataEntryCoarse(int value) {
         if (lastDataType != DataType.RPN) return;
@@ -94,7 +94,6 @@ final class Channel {
         pitchBend = (1F / 8192F) * ((value1 | (value2 << 7)) - 8192);
     }
 
-    boolean percussionChannel() { return percussionChannel; }
     int bankNumber() { return bankNumber; }
     int patchNumber() { return patchNumber; }
     float modulation() { return (50F / 16383F) * modulation; }

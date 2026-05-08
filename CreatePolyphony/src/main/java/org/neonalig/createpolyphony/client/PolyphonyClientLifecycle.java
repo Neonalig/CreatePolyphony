@@ -25,7 +25,7 @@ import org.neonalig.createpolyphony.client.timing.PolyphonyEventScheduler;
  * scheduler thread and the clock-sync ping driver run only while connected
  * to a world, so single-player title-screen idle has zero overhead.</p>
  */
-@SuppressWarnings("removal") // EventBusSubscriber.Bus deprecation: see CPNetwork for context.
+@SuppressWarnings({"removal", "unused"}) // EventBusSubscriber.Bus deprecation: see CPNetwork for context.
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class PolyphonyClientLifecycle {
 

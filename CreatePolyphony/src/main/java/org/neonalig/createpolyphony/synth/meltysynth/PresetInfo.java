@@ -43,8 +43,8 @@ final class PresetInfo {
     int bankNumber() { return bankNumber; }
     int zoneStartIndex() { return zoneStartIndex; }
     int zoneEndIndex() { return zoneEndIndex; }
-    int library() { return library; }
-    int genre() { return genre; }
-    int morphology() { return morphology; }
+    @SuppressWarnings("unused") int library() { return library; }
+    @SuppressWarnings("unused") int genre() { return genre; }
+    @SuppressWarnings("unused") int morphology() { return morphology; }
 }
 

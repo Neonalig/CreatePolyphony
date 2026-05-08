@@ -57,13 +57,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class PolyphonyClientNoteHandler {
 
-    /**
-     * Last program known to be active on each MIDI channel (0-15). {@code -1}
-     * means "no program assigned yet"; the next NoteOn on that channel will
-     * always issue a {@link PolyphonySynthesizer#programChange(int, int)}.
-     */
-    private static final int[] lastProgram = new int[16];
-
     private static final int BUS_IDLE_TIMEOUT_TICKS = 20 * 12;
     private static final int MAX_SOURCE_BUSES = 24;
     private static final int MAX_IDLE_SYNTH_POOL = 8;
@@ -148,14 +141,11 @@ public final class PolyphonyClientNoteHandler {
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
     private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
 
-    static {
-        Arrays.fill(lastProgram, -1);
-    }
-
     private PolyphonyClientNoteHandler() {}
 
     /** Network entrypoint - safe to call on the network thread. */
     public static void handle(PlayInstrumentNotePayload payload, IPayloadContext context) {
+        java.util.Objects.requireNonNull(context, "context");
         // We deliberately do NOT use enqueueWork() here. The scheduler runs on
         // its own daemon thread and synth event entry points are documented as
         // thread-safe; routing on the network thread shaves the client-tick
@@ -381,7 +371,6 @@ public final class PolyphonyClientNoteHandler {
      * audible instead of being clipped abruptly.</p>
      */
     public static void stopAll() {
-        Arrays.fill(lastProgram, -1);
         for (SourceBus bus : SOURCE_BUSES.values()) {
             bus.closeFully();
         }
@@ -655,30 +644,6 @@ public final class PolyphonyClientNoteHandler {
         }
     }
 
-    // ---- Synth lookup ------------------------------------------------------------------------
-
-    /**
-     * The current active synthesizer, or {@code null} if no soundfont is
-     * loaded. The {@link org.neonalig.createpolyphony.client.sound SoundFontManager}
-     * (registered in a later setup hook) replaces this hook to point at
-     * its own state. Keeping the lookup behind a function pointer means
-     * this handler doesn't import the manager and can be tested in
-     * isolation.
-     */
-    private static volatile java.util.function.Supplier<PolyphonySynthesizer> synthSupplier = () -> null;
-
-    public static void setSynthSupplier(java.util.function.Supplier<PolyphonySynthesizer> supplier) {
-        synthSupplier = supplier == null ? () -> null : supplier;
-    }
-
-    private static PolyphonySynthesizer currentSynth() {
-        try {
-            return synthSupplier.get();
-        } catch (Throwable t) {
-            CreatePolyphony.LOGGER.error("synthSupplier threw", t);
-            return null;
-        }
-    }
 
     private static void debugNote(String phase, PlayInstrumentNotePayload payload) {
         if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;

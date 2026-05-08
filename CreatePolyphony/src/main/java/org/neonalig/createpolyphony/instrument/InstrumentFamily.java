@@ -1,6 +1,5 @@
 package org.neonalig.createpolyphony.instrument;
 
-import net.minecraft.resources.ResourceLocation;
 import org.neonalig.createpolyphony.CreatePolyphony;
 
 import java.util.Locale;
@@ -77,11 +76,6 @@ public enum InstrumentFamily {
         return this == ONE_MAN_BAND;
     }
 
-    /** Resource location for this family's main item, e.g. {@code createpolyphony:piano}. */
-    public ResourceLocation itemId() {
-        return ResourceLocation.fromNamespaceAndPath(CreatePolyphony.MODID, id);
-    }
-
     /** Translation key for this family's display name. */
     public String translationKey() {
         return "instrument." + CreatePolyphony.MODID + "." + id;
@@ -104,10 +98,7 @@ public enum InstrumentFamily {
             case 0 -> PIANO;            // 0-7   Piano
             case 1 -> PIANO;            // 8-15  Chromatic Percussion
             case 2 -> ACCORDION;        // 16-23 Organ
-            case 3 -> {
-                // 24-31 Guitar - split: 24-26 acoustic, 27-31 electric
-                yield gmProgram <= 26 ? ACOUSTIC_GUITAR : ELECTRIC_GUITAR;
-            }
+            case 3 -> gmProgram <= 26 ? ACOUSTIC_GUITAR : ELECTRIC_GUITAR; // 24-31 Guitar split
             case 4 -> BASS_GUITAR;      // 32-39 Bass
             case 5, 6 -> VIOLIN;        // 40-55 Strings + Ensemble
             case 7 -> TRUMPET;          // 56-63 Brass
@@ -156,13 +147,6 @@ public enum InstrumentFamily {
         };
     }
 
-    /** Convenience: case-insensitive lookup by {@link #getId()}. */
-    public static InstrumentFamily byId(String id) {
-        for (var f : values()) {
-            if (f.id.equalsIgnoreCase(id)) return f;
-        }
-        throw new IllegalArgumentException("Unknown instrument family: " + id);
-    }
 
     @Override
     public String toString() {

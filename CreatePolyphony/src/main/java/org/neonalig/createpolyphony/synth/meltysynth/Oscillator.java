@@ -9,8 +9,6 @@ final class Oscillator {
 
     private short[] data;
     private LoopMode loopMode;
-    private int sampleRate;
-    private int start;
     private int end;
     private int startLoop;
     private int endLoop;
@@ -29,17 +27,17 @@ final class Oscillator {
                int rootKey, int coarseTune, int fineTune, int scaleTuning) {
         this.data = data;
         this.loopMode = loopMode;
-        this.sampleRate = sampleRate;
         // Clamp start/end defensively within data bounds to avoid AIOOBE on malformed SF2 files.
         int maxIdx = data.length - 1;
-        this.start = Math.max(0, Math.min(start, maxIdx));
-        this.end = Math.max(1, Math.min(end, maxIdx));
+        int clampedStart = Math.clamp(start, 0, maxIdx);
+        int maxEnd = Math.max(1, maxIdx);
+        this.end = Math.clamp(end, 1, maxEnd);
         // Loop points may be bogus in non-spec-compliant fonts; clamp and fall back to no-loop if invalid.
-        int clampedStartLoop = Math.max(this.start, Math.min(startLoop, this.end - 1));
-        int clampedEndLoop = Math.max(clampedStartLoop + 1, Math.min(endLoop, this.end));
+        int clampedStartLoop = Math.clamp(startLoop, clampedStart, this.end - 1);
+        int clampedEndLoop = Math.clamp(endLoop, clampedStartLoop + 1, this.end);
         if (clampedStartLoop >= clampedEndLoop) {
             // Loop window collapsed - force no-loop so the sample plays once and exits cleanly.
-            this.startLoop = this.start;
+            this.startLoop = clampedStart;
             this.endLoop = this.end;
             this.loopMode = LoopMode.NO_LOOP;
         } else {
@@ -51,7 +49,7 @@ final class Oscillator {
         this.pitchChangeScale = 0.01F * scaleTuning;
         this.sampleRateRatio = (float) sampleRate / synthesizer.sampleRate();
         this.looping = this.loopMode != LoopMode.NO_LOOP;
-        this.positionFp = (long) start << FRAC_BITS;
+        this.positionFp = (long) clampedStart << FRAC_BITS;
     }
 
     void release() {
@@ -68,7 +66,11 @@ final class Oscillator {
 
     private boolean fillBlock(float[] block, double pitchRatio) {
         long pitchRatioFp = (long) (FRAC_UNIT * pitchRatio);
-        return looping ? fillBlockContinuous(block, pitchRatioFp) : fillBlockNoLoop(block, pitchRatioFp);
+        if (looping) {
+            fillBlockContinuous(block, pitchRatioFp);
+            return true;
+        }
+        return fillBlockNoLoop(block, pitchRatioFp);
     }
 
     private boolean fillBlockNoLoop(float[] block, long pitchRatioFp) {
@@ -90,7 +92,7 @@ final class Oscillator {
         return true;
     }
 
-    private boolean fillBlockContinuous(float[] block, long pitchRatioFp) {
+    private void fillBlockContinuous(float[] block, long pitchRatioFp) {
         long endLoopFp = (long) endLoop << FRAC_BITS;
         long loopLength = endLoop - startLoop;
         long loopLengthFp = loopLength << FRAC_BITS;
@@ -109,7 +111,6 @@ final class Oscillator {
             block[t] = FP_TO_SAMPLE * (((long) x1 << FRAC_BITS) + aFp * (x2 - x1));
             positionFp += pitchRatioFp;
         }
-        return true;
     }
 }
 

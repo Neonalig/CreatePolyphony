@@ -95,10 +95,6 @@ public final class PolyphonyEventScheduler {
         }
     }
 
-    /** Run {@code task} immediately (still on the dispatcher thread, for ordering). */
-    public static void runNow(Runnable task) {
-        scheduleAt(System.nanoTime(), task);
-    }
 
     /** Drop all pending tasks without executing them. */
     public static void flushAll() {

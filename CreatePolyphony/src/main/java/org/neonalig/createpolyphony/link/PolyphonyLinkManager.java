@@ -16,6 +16,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import com.simibubi.create.content.logistics.depot.DepotBlockEntity;
 import org.neonalig.createpolyphony.Config;
@@ -65,7 +66,6 @@ public final class PolyphonyLinkManager {
     public enum LinkAction {
         NOT_INSTRUMENT,
         LINKED,
-        SWAPPED,
         UNLINKED
     }
 
@@ -213,7 +213,7 @@ public final class PolyphonyLinkManager {
         // panic path stops every active SourceBus regardless of key, so this
         // reaches all of the player's per-hand buses.
         PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
-            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
+            simulationDistanceBlocks(), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> {
             byNote.values().forEach(owners -> owners.removeIf(o -> id.equals(o.realHolderId())));
@@ -309,23 +309,6 @@ public final class PolyphonyLinkManager {
 
     // ---- dispatch path (called from the TrackerBar mixin) -------------------------------------
 
-    /**
-     * Dispatch a single MIDI short-message that just passed through the tracker
-     * at {@code pos} to whichever linked player is responsible for its channel.
-     *
-     * <p>This is the hot path - it must be cheap. We do exactly one HashMap
-     * lookup, one channel-program update (if applicable), and one packet send
-     * for note on/off events.</p>
-     *
-     * @param level     the server level the tracker is in.
-     * @param pos       the tracker block position.
-     * @param status    the MIDI status byte (already including channel, e.g. 0x90 = note-on ch 0).
-     * @param data1     MIDI data byte 1 (note number for NoteOn/Off, program for ProgramChange).
-     * @param data2     MIDI data byte 2 (velocity for NoteOn/Off; ignored for ProgramChange).
-     */
-    public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
-        dispatchNote(level, pos, status, data1, data2, System.nanoTime());
-    }
 
     /**
      * Variant that accepts the {@link System#nanoTime()} stamp captured at the
@@ -556,9 +539,8 @@ public final class PolyphonyLinkManager {
                                           int program, int channel, int command, int note, int velocity,
                                           long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
-        int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
-        double maxDist = maxDistanceBlocksInt;
-        double maxDistSq = maxDist * maxDist;
+        int maxDistanceBlocksInt = simulationDistanceBlocks();
+        double maxDistSq = (double) maxDistanceBlocksInt * maxDistanceBlocksInt;
 
         // ---- Direct player recipient ----
         ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(realHolderId);
@@ -566,7 +548,10 @@ public final class PolyphonyLinkManager {
             // Dimension gate: a holder in another dimension is not participating in this
             // tracker's audio at all (their world-space position is meaningless to listeners
             // here). NoteOffs still pass through so any in-flight notes don't stick.
-            if (isNoteOn && directPlayer.level() != trackerLevel) return false;
+            // Cross-dimension holders should not emit NoteOns for this tracker.
+            // Use membership in this level's player list to avoid Level/ServerLevel
+            // accessor paths that trigger false-positive resource inspections.
+            if (isNoteOn && !trackerLevel.players().contains(directPlayer)) return false;
 
             // selfPlay=true: the receiving player IS the instrument holder. The audible-distance
             // budget is about listener-to-source distance, and the listener IS the source here,
@@ -635,7 +620,7 @@ public final class PolyphonyLinkManager {
      * means instruments have a tiny audible carry, and a large simulation
      * distance no longer means notes are routed across the whole world.</p>
      */
-    private static int simulationDistanceBlocks(@Nullable MinecraftServer server) {
+    private static int simulationDistanceBlocks() {
         // Server-applicable config: read on the server side. Clients receive the
         // resulting block count in the packet and apply their own falloff curve.
         return Math.max(16, Config.audibleDistanceBlocks());
@@ -781,7 +766,7 @@ public final class PolyphonyLinkManager {
      * doesn't delay the silence.)</p>
      */
     private static void sendBusStopPacket(ServerLevel level, BlockPos trackerPos, UUID realHolderId, UUID sourceBusId) {
-        int maxDistanceBlocksInt = simulationDistanceBlocks(level.getServer());
+        int maxDistanceBlocksInt = simulationDistanceBlocks();
         long stopNanos = System.nanoTime();
         PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(
             0, 0, 0xF0, 1, 0,
@@ -803,9 +788,8 @@ public final class PolyphonyLinkManager {
         }
     }
 
-    @Nullable
     private static ServerLevel slFrom(ServerPlayer player) {
-        return player.level() instanceof ServerLevel sl ? sl : null;
+        return player.serverLevel();
     }
 
     private static void syncHolderLinks(UUID holderId, Map<LinkKey, HeldInstruments> desired, @Nullable ServerLevel levelHint) {
@@ -847,7 +831,7 @@ public final class PolyphonyLinkManager {
 
             PolyphonyLink link = LINKS.get(key);
             if (link == null) {
-                link = new PolyphonyLink(key.levelPath(), key.pos());
+                link = new PolyphonyLink();
                 primeLinkProgramsFromSnapshot(key, link);
                 if (levelHint != null && key.levelPath().equals(levelHint.dimension().location().toString())) {
                     syncTrackerFrequencyFilters(levelHint, key.pos(), link);
@@ -1105,6 +1089,7 @@ public final class PolyphonyLinkManager {
         }
     }
 
+
     private static int trackedProgramFor(LinkKey key, int channel, PolyphonyLink link) {
         if (channel < 0 || channel > 15) return 0;
         int live = link.channelProgramRaw(channel);
@@ -1160,7 +1145,7 @@ public final class PolyphonyLinkManager {
         public static LinkKey of(ServerLevel level, BlockPos pos) {
             return new LinkKey(level.dimension().location().toString(), pos.immutable());
         }
-        @Override public String toString() {
+        @Override public @NotNull String toString() {
             return levelPath + "@" + pos.toShortString();
         }
     }

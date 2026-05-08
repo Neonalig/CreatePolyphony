@@ -79,7 +79,7 @@ final class SoundFontSampleData {
         this.samples = localSamples;
     }
 
-    int bitsPerSample() { return bitsPerSample; }
+    @SuppressWarnings("unused") int bitsPerSample() { return bitsPerSample; }
     short[] samples() { return samples; }
 }
 
