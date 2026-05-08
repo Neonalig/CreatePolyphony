@@ -3,6 +3,7 @@ package org.neonalig.createpolyphony.client.sound;
 import net.minecraft.client.sounds.AudioStream;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.jetbrains.annotations.NotNull;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
 
 import javax.sound.sampled.AudioFormat;
@@ -94,12 +95,12 @@ public final class PolyphonyAudioStream implements AudioStream {
     }
 
     @Override
-    public AudioFormat getFormat() {
+    public @NotNull AudioFormat getFormat() {
         return format;
     }
 
     @Override
-    public ByteBuffer read(int size) throws IOException {
+    public @NotNull ByteBuffer read(int size) throws IOException {
         int frame = synth.settings().frameSize();
         int boundedSize = Math.min(size, scratch.length);
         int request = Math.max(frame, boundedSize);

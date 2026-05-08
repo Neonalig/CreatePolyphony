@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -345,8 +346,6 @@ public final class SoundFontManager {
             try {
                 synth.loadSoundFont(target.toFile(), loadProgressPercent::set);
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, true, null));
-            } catch (IOException ex) {
-                Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, ex));
             } catch (Throwable t) {
                 Minecraft.getInstance().execute(() -> completeAsyncLoad(generation, fileName, false, t));
             }
@@ -442,7 +441,7 @@ public final class SoundFontManager {
         } catch (IOException ex) {
             CreatePolyphony.LOGGER.warn("Failed to list soundfont directory {}", directory, ex);
         }
-        Collections.sort(found, String.CASE_INSENSITIVE_ORDER);
+        found.sort(String.CASE_INSENSITIVE_ORDER);
         cachedListing = Collections.unmodifiableList(found);
 
         // If our active selection was deleted underneath us, drop it.
@@ -464,7 +463,8 @@ public final class SoundFontManager {
 
     private void persistSelection() {
         try {
-            String content = activeName == null ? "" : activeName;
+            String selected = activeName;
+            String content = selected == null ? "" : selected;
             Files.writeString(selectionFile, content, StandardCharsets.UTF_8);
         } catch (IOException ex) {
             CreatePolyphony.LOGGER.warn("Failed to persist soundfont selection", ex);
@@ -508,13 +508,20 @@ public final class SoundFontManager {
                 return;
             }
 
-            // Debounce: drain any further events that arrive in the next 150 ms before rescanning.
-            try { Thread.sleep(150); } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt(); return;
-            }
-            // Ignore the actual events - we always do a full rescan, which is cheap.
             key.pollEvents();
             key.reset();
+
+            // Debounce: keep draining follow-up keys that arrive shortly after the first one.
+            try {
+                WatchKey extra;
+                while ((extra = watchService.poll(150, TimeUnit.MILLISECONDS)) != null) {
+                    extra.pollEvents();
+                    extra.reset();
+                }
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
 
             try {
                 rescanInternal();

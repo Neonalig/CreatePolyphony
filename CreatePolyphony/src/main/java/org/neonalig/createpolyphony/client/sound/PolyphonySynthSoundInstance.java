@@ -16,6 +16,7 @@ import net.minecraft.util.valueproviders.ConstantFloat;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.jetbrains.annotations.NotNull;
 import org.neonalig.createpolyphony.Config;
 import org.neonalig.createpolyphony.CreatePolyphony;
 import org.neonalig.createpolyphony.synth.PolyphonySynthesizer;
@@ -92,8 +93,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
         // loud closer to the source (gentler falloff curve) without changing
         // the routing/audible-distance budget enforced by the server.
         double falloffMult = Math.max(0.1D, Config.falloffMultiplier());
-        int attenuationField = (int) Math.max(1, Math.min(Short.MAX_VALUE,
-            Math.round(this.maxDistanceBlocks * falloffMult)));
+        int attenuationField = Math.clamp((int) Math.round(this.maxDistanceBlocks * falloffMult), 1, Short.MAX_VALUE);
         this.syntheticSound = new Sound(
             SYNTH_LOCATION,
             ConstantFloat.of(1.0F),
@@ -134,7 +134,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
      * registered {@code SoundEvent} for our synthetic location.
      */
     @Override
-    public WeighedSoundEvents resolve(SoundManager manager) {
+    public @NotNull WeighedSoundEvents resolve(@NotNull SoundManager manager) {
         this.sound = syntheticSound;
         return syntheticEvents;
     }
@@ -144,7 +144,9 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
      * of letting it try to read a non-existent .ogg.
      */
     @Override
-    public CompletableFuture<AudioStream> getStream(SoundBufferLibrary soundBuffers, Sound sound, boolean looping) {
+    public @NotNull CompletableFuture<AudioStream> getStream(@NotNull SoundBufferLibrary soundBuffers,
+                                                             @NotNull Sound sound,
+                                                             boolean looping) {
         // Apply the configured PCM gain (self vs non-self) live, so toggling
         // the held instrument or editing config takes effect on the next read.
         return CompletableFuture.completedFuture(new PolyphonyAudioStream(synth, this::currentPcmGain));
@@ -204,7 +206,7 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
             this.x = srcX;
             this.y = srcY;
             this.z = srcZ;
-            this.volume = computeDistanceVolume(p);
+            this.volume = computeDistanceVolume();
         }
 
         // Defensive: retire if the synth was closed (e.g. soundfont swap).
@@ -230,11 +232,8 @@ public final class PolyphonySynthSoundInstance extends AbstractSoundInstance imp
      * {@link Config#falloffMultiplier()} so larger values carry further within
      * the same audible-distance budget.
      */
-    private float computeDistanceVolume(LocalPlayer listener) {
+    private float computeDistanceVolume() {
         Vec3 listenerPos = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
-        if (listenerPos == null) {
-            listenerPos = listener.position();
-        }
         double dx = srcX - listenerPos.x;
         double dy = srcY - listenerPos.y;
         double dz = srcZ - listenerPos.z;

@@ -39,7 +39,7 @@ final class Envelope {
         this.holdStart = this.attackStart + Math.max(0.0, attack);
         this.decayStart = this.holdStart + Math.max(0.0, hold);
         this.releaseStart = 0.0;
-        this.sustain = Math.max(0F, Math.min(1F, sustain));
+        this.sustain = Math.clamp(sustain, 0F, 1F);
         this.releaseLevel = 0F;
         this.t = 0.0;
         this.stage = Stage.DELAY;

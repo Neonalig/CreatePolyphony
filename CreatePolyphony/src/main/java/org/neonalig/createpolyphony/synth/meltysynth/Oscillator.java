@@ -29,11 +29,12 @@ final class Oscillator {
         this.loopMode = loopMode;
         // Clamp start/end defensively within data bounds to avoid AIOOBE on malformed SF2 files.
         int maxIdx = data.length - 1;
-        int clampedStart = Math.max(0, Math.min(start, maxIdx));
-        this.end = Math.max(1, Math.min(end, maxIdx));
+        int clampedStart = Math.clamp(start, 0, maxIdx);
+        int maxEnd = Math.max(1, maxIdx);
+        this.end = Math.clamp(end, 1, maxEnd);
         // Loop points may be bogus in non-spec-compliant fonts; clamp and fall back to no-loop if invalid.
-        int clampedStartLoop = Math.max(clampedStart, Math.min(startLoop, this.end - 1));
-        int clampedEndLoop = Math.max(clampedStartLoop + 1, Math.min(endLoop, this.end));
+        int clampedStartLoop = Math.clamp(startLoop, clampedStart, this.end - 1);
+        int clampedEndLoop = Math.clamp(endLoop, clampedStartLoop + 1, this.end);
         if (clampedStartLoop >= clampedEndLoop) {
             // Loop window collapsed - force no-loop so the sample plays once and exits cleanly.
             this.startLoop = clampedStart;

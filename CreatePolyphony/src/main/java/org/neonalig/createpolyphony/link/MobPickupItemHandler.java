@@ -2,7 +2,7 @@ package org.neonalig.createpolyphony.link;
 
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Mob;
@@ -66,11 +66,12 @@ public final class MobPickupItemHandler {
             return;
         }
 
-        if (!(mob.level() instanceof ServerLevel level)) {
+        MinecraftServer server = mob.getServer();
+        if (server == null) {
             return;
         }
 
-        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(throwerId);
+        ServerPlayer owner = server.getPlayerList().getPlayer(throwerId);
         if (owner == null) {
             return;
         }

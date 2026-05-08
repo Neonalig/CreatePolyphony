@@ -73,9 +73,9 @@ public final class MeltySynthEngine {
     public void loadSoundFont(MeltySoundFont soundFont) {
         SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
         int configuredFrames = settings.pumpChunkBytes() / Math.max(1, settings.frameSize());
-        int blockFrames = Math.max(16, Math.min(256, Math.min(TARGET_SYNTH_BLOCK_FRAMES, Math.max(16, configuredFrames))));
+        int blockFrames = Math.clamp(Math.min(TARGET_SYNTH_BLOCK_FRAMES, configuredFrames), 16, 256);
         synthSettings.blockSize(blockFrames);
-        synthSettings.maximumPolyphony(Math.max(8, Math.min(256, settings.maxVoices())));
+        synthSettings.maximumPolyphony(Math.clamp(settings.maxVoices(), 8, 256));
         synthSettings.enableReverbAndChorus(true);
         Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
         this.soundFont = soundFont;
@@ -114,7 +114,7 @@ public final class MeltySynthEngine {
 
     public void pitchBend(int channel, int value) {
         if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.max(0, Math.min(16383, value)), 0);
+        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.clamp(value, 0, 16383), 0);
     }
 
     public void controlChange(int channel, int controller, int value) {
@@ -146,7 +146,7 @@ public final class MeltySynthEngine {
 
     public void pitchBendAt(int channel, int value, long nanos) {
         if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.max(0, Math.min(16383, value)), 0, nanos);
+        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.clamp(value, 0, 16383), 0, nanos);
     }
 
     public void controlChangeAt(int channel, int controller, int value, long nanos) {
@@ -198,7 +198,7 @@ public final class MeltySynthEngine {
             blockClockAnchored = true;
         }
 
-        int maxSlice = Math.max(1, Math.min(RENDER_SLICE_FRAMES, frames));
+        int maxSlice = Math.clamp(frames, 1, RENDER_SLICE_FRAMES);
         float[] left = new float[maxSlice];
         float[] right = new float[maxSlice];
 
@@ -318,7 +318,7 @@ public final class MeltySynthEngine {
 
 
     private static short toPcm16(float sample) {
-        float clamped = Math.max(-1F, Math.min(1F, sample));
+        float clamped = Math.clamp(sample, -1F, 1F);
         return (short) Math.round(clamped * Short.MAX_VALUE);
     }
 }

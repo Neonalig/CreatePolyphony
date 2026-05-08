@@ -8,6 +8,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.client.PolyphonyClientNoteHandler;
 import org.neonalig.createpolyphony.client.sound.SoundFontManager;
@@ -161,7 +162,7 @@ public final class SoundFontPickerScreen extends Screen {
 
         // If still nothing, select first entry
         if (toSelect == null && !list.children().isEmpty()) {
-            toSelect = list.children().get(0);
+            toSelect = list.children().getFirst();
         }
         list.setSelected(toSelect);
         updateControlState();
@@ -193,7 +194,7 @@ public final class SoundFontPickerScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+    public void render(@NotNull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         this.renderBackground(guiGraphics, mouseX, mouseY, partialTick);
         if (list != null) {
             list.render(guiGraphics, mouseX, mouseY, partialTick);
@@ -218,7 +219,7 @@ public final class SoundFontPickerScreen extends Screen {
             int barX = (this.width - barW) / 2;
             int barY = loadY + this.font.lineHeight + 4;
             guiGraphics.fill(barX, barY, barX + barW, barY + barH, 0xFF2A2A2A);
-            int fill = Math.max(1, Math.min(barW, Math.round(barW * manager.loadingProgress01())));
+            int fill = Math.clamp(Math.round(barW * manager.loadingProgress01()), 1, barW);
             guiGraphics.fill(barX + 1, barY + 1, barX + fill - 1, barY + barH - 1, 0xFF7CFF7C);
         }
 
@@ -301,7 +302,7 @@ public final class SoundFontPickerScreen extends Screen {
             }
 
             @Override
-            public void render(GuiGraphics guiGraphics,
+            public void render(@NotNull GuiGraphics guiGraphics,
                                int index,
                                int top,
                                int left,
@@ -346,7 +347,7 @@ public final class SoundFontPickerScreen extends Screen {
             }
 
             @Override
-            public Component getNarration() {
+            public @NotNull Component getNarration() {
                 if (fileName == null) return NONE_LABEL;
                 if (manager.hasSessionLoadFailure(fileName)) {
                     return Component.translatable("screen.createpolyphony.soundfont.warning_narration", fileName);

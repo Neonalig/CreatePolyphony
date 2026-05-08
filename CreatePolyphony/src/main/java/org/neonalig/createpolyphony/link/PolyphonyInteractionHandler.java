@@ -7,7 +7,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -58,11 +57,10 @@ public final class PolyphonyInteractionHandler {
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         Player p = event.getEntity();
         if (!(p instanceof ServerPlayer player)) return;
-        Level level = player.level();
-        if (!(level instanceof ServerLevel sl)) return;
+        ServerLevel sl = player.serverLevel();
 
         BlockPos pos = event.getPos();
-        BlockState state = level.getBlockState(pos);
+        BlockState state = sl.getBlockState(pos);
         Block block = state.getBlock();
 
         ResourceLocation blockId = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block);
@@ -98,7 +96,7 @@ public final class PolyphonyInteractionHandler {
 
         // Sanity: also make sure the BE we're talking to actually exists.
         // (We don't strictly need to check this, but log if it's missing.)
-        BlockEntity be = level.getBlockEntity(pos);
+        BlockEntity be = sl.getBlockEntity(pos);
         if (be == null) {
             CreatePolyphony.LOGGER.warn("Tracker bar at {} has no block entity - is SoS installed?", pos);
         }

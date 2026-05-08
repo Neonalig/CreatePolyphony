@@ -16,6 +16,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import com.simibubi.create.content.logistics.depot.DepotBlockEntity;
 import org.neonalig.createpolyphony.Config;
@@ -213,7 +214,7 @@ public final class PolyphonyLinkManager {
         // panic path stops every active SourceBus regardless of key, so this
         // reaches all of the player's per-hand buses.
         PacketDistributor.sendToPlayer(player, new PlayInstrumentNotePayload(0, 0, 0xF0, 0, 0, true, 0f, 0f, 0f,
-            simulationDistanceBlocks(player.getServer()), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
+            simulationDistanceBlocks(), id.getMostSignificantBits(), id.getLeastSignificantBits(), 0L));
         // Clear any tracked note-owners for this player so stale NoteOffs don't mis-route.
         ACTIVE_NOTE_OWNERS.forEach((key, byNote) -> {
             byNote.values().forEach(owners -> owners.removeIf(o -> id.equals(o.realHolderId())));
@@ -556,7 +557,7 @@ public final class PolyphonyLinkManager {
                                           int program, int channel, int command, int note, int velocity,
                                           long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
-        int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
+        int maxDistanceBlocksInt = simulationDistanceBlocks();
         double maxDistSq = (double) maxDistanceBlocksInt * maxDistanceBlocksInt;
 
         // ---- Direct player recipient ----
@@ -565,7 +566,7 @@ public final class PolyphonyLinkManager {
             // Dimension gate: a holder in another dimension is not participating in this
             // tracker's audio at all (their world-space position is meaningless to listeners
             // here). NoteOffs still pass through so any in-flight notes don't stick.
-            if (isNoteOn && directPlayer.level() != trackerLevel) return false;
+            if (isNoteOn && directPlayer.serverLevel() != trackerLevel) return false;
 
             // selfPlay=true: the receiving player IS the instrument holder. The audible-distance
             // budget is about listener-to-source distance, and the listener IS the source here,
@@ -634,7 +635,7 @@ public final class PolyphonyLinkManager {
      * means instruments have a tiny audible carry, and a large simulation
      * distance no longer means notes are routed across the whole world.</p>
      */
-    private static int simulationDistanceBlocks(@Nullable MinecraftServer server) {
+    private static int simulationDistanceBlocks() {
         // Server-applicable config: read on the server side. Clients receive the
         // resulting block count in the packet and apply their own falloff curve.
         return Math.max(16, Config.audibleDistanceBlocks());
@@ -780,7 +781,7 @@ public final class PolyphonyLinkManager {
      * doesn't delay the silence.)</p>
      */
     private static void sendBusStopPacket(ServerLevel level, BlockPos trackerPos, UUID realHolderId, UUID sourceBusId) {
-        int maxDistanceBlocksInt = simulationDistanceBlocks(level.getServer());
+        int maxDistanceBlocksInt = simulationDistanceBlocks();
         long stopNanos = System.nanoTime();
         PlayInstrumentNotePayload payload = new PlayInstrumentNotePayload(
             0, 0, 0xF0, 1, 0,
@@ -802,9 +803,8 @@ public final class PolyphonyLinkManager {
         }
     }
 
-    @Nullable
     private static ServerLevel slFrom(ServerPlayer player) {
-        return player.level() instanceof ServerLevel sl ? sl : null;
+        return player.serverLevel();
     }
 
     private static void syncHolderLinks(UUID holderId, Map<LinkKey, HeldInstruments> desired, @Nullable ServerLevel levelHint) {
@@ -1159,7 +1159,7 @@ public final class PolyphonyLinkManager {
         public static LinkKey of(ServerLevel level, BlockPos pos) {
             return new LinkKey(level.dimension().location().toString(), pos.immutable());
         }
-        @Override public String toString() {
+        @Override public @NotNull String toString() {
             return levelPath + "@" + pos.toShortString();
         }
     }

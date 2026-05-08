@@ -8,7 +8,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -58,7 +57,7 @@ public final class MidiFile {
             if (loopPoint != 0) {
                 List<Integer> tickList = tickLists[0];
                 List<Message> messageList = messageLists[0];
-                if (loopPoint <= tickList.get(tickList.size() - 1)) {
+                if (loopPoint <= tickList.getLast()) {
                     for (int i = 0; i < tickList.size(); i++) {
                         if (tickList.get(i) >= loopPoint) {
                             tickList.add(i, loopPoint);
@@ -245,21 +244,25 @@ public final class MidiFile {
             if (command == 0xB0) {
                 int d1 = data1 & 0xFF;
                 return switch (loopType) {
-                    case RPG_MAKER -> d1 == 111 ? loopStart() : new Message(channel, command, d1, data2 & 0xFF);
+                    case RPG_MAKER -> d1 == 111 ? loopStart() : controlMessage(channel, command, d1, data2);
                     case INCREDIBLE_MACHINE -> {
                         if (d1 == 110) yield loopStart();
                         if (d1 == 111) yield loopEnd();
-                        yield new Message(channel, command, d1, data2 & 0xFF);
+                        yield controlMessage(channel, command, d1, data2);
                     }
                     case FINAL_FANTASY -> {
                         if (d1 == 116) yield loopStart();
                         if (d1 == 117) yield loopEnd();
-                        yield new Message(channel, command, d1, data2 & 0xFF);
+                        yield controlMessage(channel, command, d1, data2);
                     }
-                    case NONE -> new Message(channel, command, d1, data2 & 0xFF);
+                    case NONE -> controlMessage(channel, command, d1, data2);
                 };
             }
             return new Message(channel, command, data1 & 0xFF, data2 & 0xFF);
+        }
+
+        private static Message controlMessage(int channel, int command, int data1, byte data2) {
+            return new Message(channel, command, data1, data2 & 0xFF);
         }
 
         static Message tempoChange(int tempo) {

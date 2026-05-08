@@ -43,7 +43,7 @@ public final class OneManBandNameHandler {
             ? base
             : Component.translatable("item.createpolyphony.linked_name", base, target.coords());
 
-        event.getToolTip().set(0, displayName.withStyle(event.getToolTip().get(0).getStyle()));
+        event.getToolTip().set(0, displayName.withStyle(event.getToolTip().getFirst().getStyle()));
     }
 }
 

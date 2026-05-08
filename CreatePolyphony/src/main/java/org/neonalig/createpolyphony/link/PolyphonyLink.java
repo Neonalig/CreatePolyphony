@@ -176,7 +176,7 @@ public final class PolyphonyLink {
     public int channelProgram(int channel) {
         if (channel < 0 || channel > 15) return 0;
         int p = channelPrograms[channel];
-        return p < 0 ? 0 : p;
+        return Math.max(p, 0);
     }
 
     /** Raw channel program state: -1 when unknown, else 0..127. */

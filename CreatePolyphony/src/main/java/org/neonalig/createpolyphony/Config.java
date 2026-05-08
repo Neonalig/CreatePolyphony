@@ -134,6 +134,6 @@ public class Config {
     private static int scaleLegacyStereoBytes(int configuredBytes, int channels, int minBytes) {
         long scaled = (long) configuredBytes * (long) Math.max(1, channels);
         scaled /= 2L; // legacy baseline was stereo (2 channels)
-        return (int) Math.max(minBytes, Math.min(Integer.MAX_VALUE, scaled));
+        return Math.clamp(scaled, minBytes, Integer.MAX_VALUE);
     }
 }
