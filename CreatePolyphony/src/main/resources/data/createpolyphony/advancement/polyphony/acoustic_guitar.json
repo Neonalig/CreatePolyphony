@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_acoustic_guitar": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:acoustic_guitar"
+            ]
+          }
+        ]
+      }
     }
   }
 }

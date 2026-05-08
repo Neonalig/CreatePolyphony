@@ -17,34 +17,124 @@
   },
   "criteria": {
     "have_piano": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:piano"
+            ]
+          }
+        ]
+      }
     },
     "have_acoustic_guitar": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:acoustic_guitar"
+            ]
+          }
+        ]
+      }
     },
     "have_electric_guitar": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:electric_guitar"
+            ]
+          }
+        ]
+      }
     },
     "have_bass_guitar": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:bass_guitar"
+            ]
+          }
+        ]
+      }
     },
     "have_violin": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:violin"
+            ]
+          }
+        ]
+      }
     },
     "have_trumpet": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:trumpet"
+            ]
+          }
+        ]
+      }
     },
     "have_flute": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:flute"
+            ]
+          }
+        ]
+      }
     },
     "have_accordion": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:accordion"
+            ]
+          }
+        ]
+      }
     },
     "have_drum_kit": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:drum_kit"
+            ]
+          }
+        ]
+      }
     },
     "have_one_man_band": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:one_man_band"
+            ]
+          }
+        ]
+      }
     },
     "used_on_tracker": {
       "trigger": "minecraft:impossible"

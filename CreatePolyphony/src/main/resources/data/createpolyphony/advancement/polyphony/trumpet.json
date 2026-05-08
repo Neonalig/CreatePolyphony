@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_trumpet": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:trumpet"
+            ]
+          }
+        ]
+      }
     }
   }
 }

@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_flute": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:flute"
+            ]
+          }
+        ]
+      }
     }
   }
 }

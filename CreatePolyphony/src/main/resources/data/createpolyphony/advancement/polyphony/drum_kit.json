@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_drum_kit": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:drum_kit"
+            ]
+          }
+        ]
+      }
     }
   }
 }

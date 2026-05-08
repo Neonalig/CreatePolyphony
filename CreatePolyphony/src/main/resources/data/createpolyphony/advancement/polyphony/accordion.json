@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_accordion": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:accordion"
+            ]
+          }
+        ]
+      }
     }
   }
 }

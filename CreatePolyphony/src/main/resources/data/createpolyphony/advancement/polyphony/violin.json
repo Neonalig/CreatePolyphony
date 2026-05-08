@@ -17,7 +17,16 @@
   },
   "criteria": {
     "have_violin": {
-      "trigger": "minecraft:impossible"
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": [
+              "createpolyphony:violin"
+            ]
+          }
+        ]
+      }
     }
   }
 }
