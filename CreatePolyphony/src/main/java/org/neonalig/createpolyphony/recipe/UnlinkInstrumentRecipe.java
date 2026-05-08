@@ -7,6 +7,7 @@ import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.CustomRecipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.level.Level;
+import org.jetbrains.annotations.NotNull;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
 import org.neonalig.createpolyphony.link.InstrumentLinkData;
 import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
@@ -21,12 +22,12 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
     }
 
     @Override
-    public boolean matches(CraftingInput input, Level level) {
+    public boolean matches(@NotNull CraftingInput input, @NotNull Level level) {
         return findLinkedInstrument(input) != null;
     }
 
     @Override
-    public ItemStack assemble(CraftingInput input, HolderLookup.Provider registries) {
+    public @NotNull ItemStack assemble(@NotNull CraftingInput input, @NotNull HolderLookup.Provider registries) {
         ItemStack source = findLinkedInstrument(input);
         if (source == null) return ItemStack.EMPTY;
 
@@ -47,7 +48,7 @@ public final class UnlinkInstrumentRecipe extends CustomRecipe {
     }
 
     @Override
-    public RecipeSerializer<?> getSerializer() {
+    public @NotNull RecipeSerializer<?> getSerializer() {
         return CPRecipeSerializers.UNLINK_INSTRUMENT.get();
     }
 

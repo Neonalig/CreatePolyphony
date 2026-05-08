@@ -4,6 +4,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.link.InstrumentLinkData;
 
@@ -52,7 +53,7 @@ public class InstrumentItem extends Item {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, TooltipContext ctx, List<Component> tooltip, TooltipFlag flag) {
+    public void appendHoverText(@NotNull ItemStack stack, @NotNull TooltipContext ctx, @NotNull List<Component> tooltip, @NotNull TooltipFlag flag) {
         super.appendHoverText(stack, ctx, tooltip, flag);
         InstrumentLinkData.LinkTarget target = InstrumentLinkData.target(stack);
         String hintKey = target == null
@@ -69,12 +70,12 @@ public class InstrumentItem extends Item {
     }
 
     @Override
-    public boolean isFoil(ItemStack stack) {
+    public boolean isFoil(@NotNull ItemStack stack) {
         return InstrumentLinkData.isLinked(stack) || super.isFoil(stack);
     }
 
     @Override
-    public Component getName(ItemStack stack) {
+    public @NotNull Component getName(@NotNull ItemStack stack) {
         Component base;
         if (family == InstrumentFamily.ONE_MAN_BAND) {
             String key = oneManBandNameKeySupplier.get();

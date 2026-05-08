@@ -33,11 +33,10 @@ final class SoundFontParameters {
             switch (id) {
                 case "phdr" -> presetInfos = PresetInfo.readFromChunk(reader, size);
                 case "pbag" -> presetBag = ZoneInfo.readFromChunk(reader, size);
-                case "pmod" -> Modulator.discardData((RandomAccessFile) reader, size);
+                case "pmod", "imod" -> Modulator.discardData((RandomAccessFile) reader, size);
                 case "pgen" -> presetGenerators = Generator.readFromChunk(reader, size);
                 case "inst" -> instrumentInfos = InstrumentInfo.readFromChunk(reader, size);
                 case "ibag" -> instrumentBag = ZoneInfo.readFromChunk(reader, size);
-                case "imod" -> Modulator.discardData((RandomAccessFile) reader, size);
                 case "igen" -> instrumentGenerators = Generator.readFromChunk(reader, size);
                 case "shdr" -> localSampleHeaders = SampleHeader.readFromChunk(reader, size);
                 default -> throw new IOException("The INFO list contains an unknown ID '" + id + "'.");

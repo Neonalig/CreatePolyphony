@@ -58,7 +58,7 @@ public final class Synthesizer implements IAudioRenderer {
             reverbInput = new float[blockSize];
             reverbOutputLeft = new float[blockSize];
             reverbOutputRight = new float[blockSize];
-            chorus = new Chorus(sampleRate, 0.002, 0.0019, 0.4);
+            chorus = new Chorus(sampleRate);
             chorusInputLeft = new float[blockSize];
             chorusInputRight = new float[blockSize];
             chorusOutputLeft = new float[blockSize];

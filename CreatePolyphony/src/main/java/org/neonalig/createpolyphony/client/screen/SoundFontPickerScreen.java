@@ -60,7 +60,7 @@ public final class SoundFontPickerScreen extends Screen {
 
         this.listTop = HEADER_H;
         this.listBottom = this.height - FOOTER_H;
-        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, this.width, this.listBottom, this.listTop, 20));
+        this.list = this.addRenderableWidget(new SoundFontList(this.minecraft, this.width, this.listBottom, this.listTop));
 
         // Search bar in the header panel
         int searchW = Math.min(300, this.width - 20);
@@ -235,13 +235,14 @@ public final class SoundFontPickerScreen extends Screen {
     }
 
     private final class SoundFontList extends ObjectSelectionList<SoundFontList.Entry> {
+        private static final int ITEM_HEIGHT = 20;
 
         /** Full, unfiltered list of soundfont file names from the manager. */
         private final List<String> allFileNames = new ArrayList<>();
         private String currentFilter = "";
 
-        private SoundFontList(Minecraft minecraft, int width, int bottom, int top, int itemHeight) {
-            super(minecraft, width, bottom, top, itemHeight);
+        private SoundFontList(Minecraft minecraft, int width, int bottom, int top) {
+            super(minecraft, width, bottom, top, ITEM_HEIGHT);
         }
 
         /** Replaces the stored file-name list and rebuilds visible entries with the given filter. */

@@ -44,11 +44,11 @@ final class ModulationEnvelope {
         releaseLevel = value;
     }
 
-    boolean process() {
-        return process(synthesizer.blockSize());
+    void process() {
+        process(synthesizer.blockSize());
     }
 
-    private boolean process(int sampleCount) {
+    private void process(int sampleCount) {
         processedSampleCount += sampleCount;
         double currentTime = (double) processedSampleCount / synthesizer.sampleRate();
         while (stage.ordinal() <= Stage.HOLD.ordinal()) {
@@ -66,26 +66,11 @@ final class ModulationEnvelope {
         }
 
         switch (stage) {
-            case DELAY -> {
-                value = 0F;
-                return true;
-            }
-            case ATTACK -> {
-                value = (float) (attackSlope * (currentTime - attackStartTime));
-                return true;
-            }
-            case HOLD -> {
-                value = 1F;
-                return true;
-            }
-            case DECAY -> {
-                value = Math.max((float) (decaySlope * (decayEndTime - currentTime)), sustainLevel);
-                return value > SoundFontMath.NON_AUDIBLE;
-            }
-            case RELEASE -> {
-                value = Math.max((float) (releaseLevel * releaseSlope * (releaseEndTime - currentTime)), 0F);
-                return value > SoundFontMath.NON_AUDIBLE;
-            }
+            case DELAY -> value = 0F;
+            case ATTACK -> value = (float) (attackSlope * (currentTime - attackStartTime));
+            case HOLD -> value = 1F;
+            case DECAY -> value = Math.max((float) (decaySlope * (decayEndTime - currentTime)), sustainLevel);
+            case RELEASE -> value = Math.max((float) (releaseLevel * releaseSlope * (releaseEndTime - currentTime)), 0F);
             default -> throw new IllegalStateException("Invalid envelope stage.");
         }
     }

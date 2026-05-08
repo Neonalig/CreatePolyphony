@@ -66,7 +66,11 @@ final class Oscillator {
 
     private boolean fillBlock(float[] block, double pitchRatio) {
         long pitchRatioFp = (long) (FRAC_UNIT * pitchRatio);
-        return looping ? fillBlockContinuous(block, pitchRatioFp) : fillBlockNoLoop(block, pitchRatioFp);
+        if (looping) {
+            fillBlockContinuous(block, pitchRatioFp);
+            return true;
+        }
+        return fillBlockNoLoop(block, pitchRatioFp);
     }
 
     private boolean fillBlockNoLoop(float[] block, long pitchRatioFp) {
@@ -88,7 +92,7 @@ final class Oscillator {
         return true;
     }
 
-    private boolean fillBlockContinuous(float[] block, long pitchRatioFp) {
+    private void fillBlockContinuous(float[] block, long pitchRatioFp) {
         long endLoopFp = (long) endLoop << FRAC_BITS;
         long loopLength = endLoop - startLoop;
         long loopLengthFp = loopLength << FRAC_BITS;
@@ -107,7 +111,6 @@ final class Oscillator {
             block[t] = FP_TO_SAMPLE * (((long) x1 << FRAC_BITS) + aFp * (x2 - x1));
             positionFp += pitchRatioFp;
         }
-        return true;
     }
 }
 

@@ -1,9 +1,9 @@
 package org.neonalig.createpolyphony.synth.meltysynth;
 
 public final class SynthesizerSettings {
-    static int DEFAULT_BLOCK_SIZE = 64;
-    static int DEFAULT_MAXIMUM_POLYPHONY = 64;
-    static boolean DEFAULT_ENABLE_REVERB_AND_CHORUS = true;
+    static final int DEFAULT_BLOCK_SIZE = 64;
+    static final int DEFAULT_MAXIMUM_POLYPHONY = 64;
+    static final boolean DEFAULT_ENABLE_REVERB_AND_CHORUS = true;
 
     private int sampleRate;
     private int blockSize;

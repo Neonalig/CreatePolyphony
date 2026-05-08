@@ -57,13 +57,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class PolyphonyClientNoteHandler {
 
-    /**
-     * Last program known to be active on each MIDI channel (0-15). {@code -1}
-     * means "no program assigned yet"; the next NoteOn on that channel will
-     * always issue a {@link PolyphonySynthesizer#programChange(int, int)}.
-     */
-    private static final int[] lastProgram = new int[16];
-
     private static final int BUS_IDLE_TIMEOUT_TICKS = 20 * 12;
     private static final int MAX_SOURCE_BUSES = 24;
     private static final int MAX_IDLE_SYNTH_POOL = 8;
@@ -147,10 +140,6 @@ public final class PolyphonyClientNoteHandler {
 
     /** Limited debug breadcrumbs to verify packet flow without flooding logs. */
     private static final AtomicInteger NOTE_DEBUG_BUDGET = new AtomicInteger(64);
-
-    static {
-        Arrays.fill(lastProgram, -1);
-    }
 
     private PolyphonyClientNoteHandler() {}
 
@@ -381,7 +370,6 @@ public final class PolyphonyClientNoteHandler {
      * audible instead of being clipped abruptly.</p>
      */
     public static void stopAll() {
-        Arrays.fill(lastProgram, -1);
         for (SourceBus bus : SOURCE_BUSES.values()) {
             bus.closeFully();
         }

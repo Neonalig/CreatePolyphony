@@ -15,6 +15,7 @@ package org.neonalig.createpolyphony.synth.meltysynth;
  * keep correctness if more producers ever appear.</p>
  */
 final class MidiEventQueue {
+    private static final int DEFAULT_CAPACITY = 8192;
 
     private final int[] type;
     private final int[] channel;
@@ -27,8 +28,8 @@ final class MidiEventQueue {
     private int tail;
     private int size;
 
-    MidiEventQueue(int capacity) {
-        this.capacity = Math.max(32, capacity);
+    MidiEventQueue() {
+        this.capacity = DEFAULT_CAPACITY;
         this.type = new int[this.capacity];
         this.channel = new int[this.capacity];
         this.data1 = new int[this.capacity];

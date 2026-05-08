@@ -3,6 +3,10 @@ package org.neonalig.createpolyphony.synth.meltysynth;
 import java.util.Arrays;
 
 final class Chorus {
+    private static final double DEFAULT_DELAY_SECONDS = 0.002;
+    private static final double DEFAULT_DEPTH_SECONDS = 0.0019;
+    private static final double DEFAULT_FREQUENCY_HZ = 0.4;
+
     private final float[] bufferL;
     private final float[] bufferR;
     private final float[] delayTable;
@@ -10,10 +14,12 @@ final class Chorus {
     private int delayTableIndexL;
     private int delayTableIndexR;
 
-    Chorus(int sampleRate, double delay, double depth, double frequency) {
+    Chorus(int sampleRate) {
+        double delay = DEFAULT_DELAY_SECONDS;
+        double depth = DEFAULT_DEPTH_SECONDS;
         bufferL = new float[(int) (sampleRate * (delay + depth)) + 2];
         bufferR = new float[(int) (sampleRate * (delay + depth)) + 2];
-        delayTable = new float[(int) Math.round(sampleRate / frequency)];
+        delayTable = new float[(int) Math.round(sampleRate / DEFAULT_FREQUENCY_HZ)];
         for (int t = 0; t < delayTable.length; t++) {
             double phase = 2 * Math.PI * t / delayTable.length;
             delayTable[t] = (float) (sampleRate * (delay + depth * Math.sin(phase)));

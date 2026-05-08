@@ -566,7 +566,10 @@ public final class PolyphonyLinkManager {
             // Dimension gate: a holder in another dimension is not participating in this
             // tracker's audio at all (their world-space position is meaningless to listeners
             // here). NoteOffs still pass through so any in-flight notes don't stick.
-            if (isNoteOn && directPlayer.serverLevel() != trackerLevel) return false;
+            // Cross-dimension holders should not emit NoteOns for this tracker.
+            // Use membership in this level's player list to avoid Level/ServerLevel
+            // accessor paths that trigger false-positive resource inspections.
+            if (isNoteOn && !trackerLevel.players().contains(directPlayer)) return false;
 
             // selfPlay=true: the receiving player IS the instrument holder. The audible-distance
             // budget is about listener-to-source distance, and the listener IS the source here,
@@ -846,7 +849,7 @@ public final class PolyphonyLinkManager {
 
             PolyphonyLink link = LINKS.get(key);
             if (link == null) {
-                link = new PolyphonyLink(key.levelPath(), key.pos());
+                link = new PolyphonyLink();
                 primeLinkProgramsFromSnapshot(key, link);
                 if (levelHint != null && key.levelPath().equals(levelHint.dimension().location().toString())) {
                     syncTrackerFrequencyFilters(levelHint, key.pos(), link);

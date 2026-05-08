@@ -61,7 +61,7 @@ final class Envelope {
                 case DELAY -> attackStart;
                 case ATTACK -> holdStart;
                 case HOLD -> decayStart;
-                default -> decayStart;
+                default -> throw new IllegalStateException("Invalid envelope stage.");
             };
             if (t < endTime) break;
             stage = Stage.values()[stage.ordinal() + 1];

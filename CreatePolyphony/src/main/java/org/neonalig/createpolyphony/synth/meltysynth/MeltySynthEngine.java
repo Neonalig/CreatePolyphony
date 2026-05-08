@@ -44,7 +44,7 @@ public final class MeltySynthEngine {
 
     private final SynthSettings settings;
 
-    private final MidiEventQueue midiQueue = new MidiEventQueue(8192);
+    private final MidiEventQueue midiQueue = new MidiEventQueue();
     private final int[] midiEventScratch = new int[4];
 
     private volatile MeltySoundFont soundFont;

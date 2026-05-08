@@ -58,10 +58,12 @@ final class BiQuadFilter {
             }
         } else {
             if (block.length >= 2) {
-                x2 = block[block.length - 2];
-                x1 = block[block.length - 1];
-                y2 = x2;
-                y1 = x1;
+                float previous = block[block.length - 2];
+                float current = block[block.length - 1];
+                x2 = previous;
+                x1 = current;
+                y2 = previous;
+                y1 = current;
             }
         }
     }

@@ -14,15 +14,14 @@ final class Lfo {
     }
 
     void start(float delay, float frequency) {
+        value = 0F;
         if (frequency > 1.0E-3F) {
             active = true;
             this.delay = delay;
             this.period = 1.0 / frequency;
             processedSampleCount = 0;
-            value = 0F;
         } else {
             active = false;
-            value = 0F;
         }
     }
 

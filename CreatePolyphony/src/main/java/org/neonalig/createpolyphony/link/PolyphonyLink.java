@@ -1,6 +1,5 @@
 package org.neonalig.createpolyphony.link;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.Nullable;
 import org.neonalig.createpolyphony.instrument.InstrumentFamily;
@@ -64,11 +63,6 @@ import java.util.UUID;
  */
 public final class PolyphonyLink {
 
-    /** The level (dimension) the tracker is in - identified by its dimension key path. */
-    private final String levelKey;
-    /** The tracker block position. */
-    private final BlockPos pos;
-
     /**
      * Linked players, keyed by UUID. {@link LinkedHashMap} keeps insertion order
      * stable, which makes participant ordering deterministic.
@@ -87,15 +81,10 @@ public final class PolyphonyLink {
     /** Optional per-channel instrument item filter copied from tracker frequency slots. */
     private final Item[] channelFilterItems = new Item[16];
 
-    public PolyphonyLink(String levelKey, BlockPos pos) {
-        this.levelKey = levelKey;
-        this.pos = pos.immutable();
+    public PolyphonyLink() {
         Arrays.fill(channelPrograms, -1);
         Arrays.fill(channelAssignments, List.of());
     }
-
-    public String levelKey() { return levelKey; }
-    public BlockPos pos() { return pos; }
 
     /** Returns the live (mutable) map of linked players. Caller must not mutate. */
     public Map<UUID, LinkedPlayer> players() {
@@ -111,20 +100,17 @@ public final class PolyphonyLink {
      * Add or refresh a player on this link from their current main/off-hand
      * linked instruments. Triggers reassignment.
      *
-     * @return {@code true} if this was a new link, {@code false} if it was a refresh.
      */
-    public boolean addOrRefreshPlayer(UUID holderId,
+    public void addOrRefreshPlayer(UUID holderId,
                                       @Nullable InstrumentFamily mainHandFamily,
                                       @Nullable InstrumentFamily offHandFamily,
                                       @Nullable Item mainHandItem,
                                       @Nullable Item offHandItem) {
         if (mainHandFamily == null && offHandFamily == null) {
-            return false;
+            return;
         }
-        boolean isNew = !players.containsKey(holderId);
         players.put(holderId, new LinkedPlayer(holderId, mainHandFamily, offHandFamily, mainHandItem, offHandItem));
         recomputeAssignments();
-        return isNew;
     }
 
     /**
@@ -149,12 +135,11 @@ public final class PolyphonyLink {
 
     /**
      * Remove a player from this link.
-     * @return {@code true} if the player was actually linked.
      */
-    public boolean removePlayer(UUID id) {
-        boolean removed = players.remove(id) != null;
-        if (removed) recomputeAssignments();
-        return removed;
+    public void removePlayer(UUID id) {
+        if (players.remove(id) != null) {
+            recomputeAssignments();
+        }
     }
 
     /** Record the latest GM program for a channel (from a ProgramChange MIDI message). */
@@ -165,19 +150,6 @@ public final class PolyphonyLink {
         recomputeAssignments();
     }
 
-    /**
-     * Returns the most recently observed GM program (0-127) for the given
-     * channel, or 0 (Acoustic Grand Piano) if the channel has not yet
-     * received a ProgramChange. By GM convention, channel 9 is always a
-     * percussion channel - we still return whatever ProgramChange (if any)
-     * was sent for it; the caller is responsible for the "channel 10 is
-     * drums" semantic if it cares.
-     */
-    public int channelProgram(int channel) {
-        if (channel < 0 || channel > 15) return 0;
-        int p = channelPrograms[channel];
-        return Math.max(p, 0);
-    }
 
     /** Raw channel program state: -1 when unknown, else 0..127. */
     public int channelProgramRaw(int channel) {

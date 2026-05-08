@@ -72,7 +72,8 @@ public final class PcmRingBuffer {
                 if (closed) return written;
                 while (size == capacity && !closed) {
                     // Wait up to 50 ms then re-check; bounded so a closing flag is acted on promptly.
-                    notFull.await(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    boolean signaled = notFull.await(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (!signaled && closed) return written;
                 }
                 if (closed) return written;
                 int free = capacity - size;
