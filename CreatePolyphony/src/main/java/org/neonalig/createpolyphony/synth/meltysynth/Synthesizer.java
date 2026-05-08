@@ -136,6 +136,10 @@ public final class Synthesizer implements IAudioRenderer {
     public void noteOffAll(boolean immediate) {
         if (immediate) {
             voices.clear();
+            if (enableReverbAndChorus) {
+                chorus.mute();
+                reverb.mute();
+            }
         } else {
             for (Voice voice : voices) {
                 voice.end();

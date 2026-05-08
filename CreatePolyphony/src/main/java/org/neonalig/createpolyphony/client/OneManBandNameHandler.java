@@ -15,7 +15,7 @@ import org.neonalig.createpolyphony.link.InstrumentLinkData;
 /**
  * Client-only cosmetic rename for the One Man Band item.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class OneManBandNameHandler {
 

@@ -22,7 +22,7 @@ import java.util.UUID;
  * Awards the jam-session advancement when a mob actually picks up an instrument
  * item entity thrown by a player.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME)
 public final class MobPickupItemHandler {
 

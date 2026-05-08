@@ -21,7 +21,7 @@ import static net.minecraft.commands.Commands.literal;
 /**
  * Client-side debug/testing commands for soundfont UI and synth config.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
 public final class PolyphonyClientTestCommands {
 

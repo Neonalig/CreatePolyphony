@@ -39,6 +39,7 @@ public abstract class TrackerBarBlockEntityMixin {
      * <pre>{@code public void handleNote(ShortMessage sm)}</pre>
      * We don't override the call - just observe.
      */
+    @SuppressWarnings("unused")
     @Inject(method = "handleNote(Ljavax/sound/midi/ShortMessage;)V", at = @At("HEAD"))
     private void createpolyphony$onHandleNote(ShortMessage sm, CallbackInfo ci) {
         // Capture the nanoTime stamp as early as possible so it reflects when

@@ -19,7 +19,7 @@ import net.minecraft.client.Minecraft;
  * client-side classes.
  */
 @OnlyIn(Dist.CLIENT)
-@SuppressWarnings("removal") // EventBusSubscriber.Bus deprecation: see CPNetwork for context.
+@SuppressWarnings({"removal", "unused"}) // EventBusSubscriber.Bus deprecation: see CPNetwork for context.
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public final class PolyphonyClientBootstrap {
 

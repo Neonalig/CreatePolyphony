@@ -24,6 +24,7 @@ import java.util.UUID;
 @Mixin(value = DeployerHandler.class, remap = false)
 public abstract class DeployerHandlerMixin {
 
+    @SuppressWarnings("unused")
     @Inject(
         method = "activate(Lcom/simibubi/create/content/kinetics/deployer/DeployerFakePlayer;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/Vec3;Lcom/simibubi/create/content/kinetics/deployer/DeployerBlockEntity$Mode;)V",
         at = @At("TAIL")

@@ -1089,6 +1089,7 @@ public final class PolyphonyLinkManager {
         }
     }
 
+
     private static int trackedProgramFor(LinkKey key, int channel, PolyphonyLink link) {
         if (channel < 0 || channel > 15) return 0;
         int live = link.channelProgramRaw(channel);

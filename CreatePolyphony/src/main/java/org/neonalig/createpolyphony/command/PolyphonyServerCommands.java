@@ -25,7 +25,7 @@ import static net.minecraft.commands.Commands.literal;
 /**
  * Server-side commands for link management and admin safety controls.
  */
-@SuppressWarnings("removal")
+@SuppressWarnings({"removal", "unused"})
 @EventBusSubscriber(modid = CreatePolyphony.MODID, bus = EventBusSubscriber.Bus.GAME)
 public final class PolyphonyServerCommands {
 

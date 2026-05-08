@@ -41,6 +41,7 @@ public abstract class DeployerBlockEntityMixin {
     @Shadow protected DeployerFakePlayer player;
     @Shadow protected boolean redstoneLocked;
 
+    @SuppressWarnings("unused")
     @Inject(method = "tick()V", at = @At("HEAD"))
     private void createpolyphony$heartbeat(CallbackInfo ci) {
         BlockEntity be = (BlockEntity) (Object) this;

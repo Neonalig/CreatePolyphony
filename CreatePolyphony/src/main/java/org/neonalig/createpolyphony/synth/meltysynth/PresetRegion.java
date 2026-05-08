@@ -3,7 +3,6 @@ package org.neonalig.createpolyphony.synth.meltysynth;
 import java.io.IOException;
 
 public final class PresetRegion {
-    static final PresetRegion DEFAULT = new PresetRegion();
 
     private final short[] gs;
     private Instrument instrument;

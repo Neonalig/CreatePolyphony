@@ -105,7 +105,8 @@ neoForge {
         // mostly optional in a single mod project
         // but multi mod projects should define one per mod
         "${modId}" {
-            sourceSet(sourceSets.getByName("main"))
+            //noinspection GrUnresolvedAccess, GroovyAssignabilityCheck // Justification: NeoForge's DSL is dynamically generated and thus not statically resolvable by the IDE, but it does work at runtime.
+            sourceSet(sourceSets.main)
         }
     }
 }
@@ -204,12 +205,10 @@ neoForge.ideSyncTask generateModMetadata
 // Example configuration to allow publishing using the maven-publish plugin
 publishing {
     publications {
-        create('mavenJava', MavenPublication) {
-            def javaComponent = components.findByName("java")
-            if (javaComponent != null) {
-                from(javaComponent)
-            }
-        }
+        register('mavenJava', MavenPublication) {
+            //noinspection GrUnresolvedAccess, GroovyAssignabilityCheck // Justification: NeoForge's DSL is dynamically generated and thus not statically resolvable by the IDE, but it does work at runtime.
+            from components.java
+    }
     }
     repositories {
         maven {

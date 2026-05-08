@@ -31,6 +31,7 @@ public final class CreatePolyphony {
     public static final String MODID = "createpolyphony";
     public static final Logger LOGGER = LogUtils.getLogger();
 
+    @SuppressWarnings("unused")
     public CreatePolyphony(IEventBus modEventBus, ModContainer modContainer) {
         // Register deferred-register holders to the mod event bus so the
         // game knows about our items and creative tab.
