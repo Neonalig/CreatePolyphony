@@ -17,16 +17,7 @@
   },
   "criteria": {
     "have_bass_guitar": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:bass_guitar"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     }
   }
 }

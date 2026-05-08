@@ -17,195 +17,43 @@
   },
   "criteria": {
     "have_piano": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:piano"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_acoustic_guitar": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:acoustic_guitar"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_electric_guitar": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:electric_guitar"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_bass_guitar": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:bass_guitar"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_violin": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:violin"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_trumpet": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:trumpet"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_flute": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:flute"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_accordion": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:accordion"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_drum_kit": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:drum_kit"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "have_one_man_band": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:one_man_band"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     },
     "used_on_tracker": {
-      "trigger": "minecraft:item_used_on_block",
-      "conditions": {
-        "location": {
-          "block": {
-            "blocks": [
-              "pipeorgans:tracker_bar"
-            ]
-          }
-        },
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     },
     "used_on_deployer": {
-      "trigger": "minecraft:item_used_on_block",
-      "conditions": {
-        "location": {
-          "block": {
-            "blocks": [
-              "create:deployer"
-            ]
-          }
-        },
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     },
     "shared_with_entity": {
-      "trigger": "minecraft:thrown_item_picked_up_by_entity",
-      "conditions": {
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     }
   },
   "requirements": [

@@ -17,16 +17,7 @@
   },
   "criteria": {
     "have_piano": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:piano"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     }
   }
 }

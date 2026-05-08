@@ -17,16 +17,7 @@
   },
   "criteria": {
     "have_electric_guitar": {
-      "trigger": "minecraft:inventory_changed",
-      "conditions": {
-        "items": [
-          {
-            "items": [
-              "createpolyphony:electric_guitar"
-            ]
-          }
-        ]
-      }
+      "trigger": "minecraft:impossible"
     }
   }
 }
