@@ -153,9 +153,11 @@ dependencies {
 // our mixin config JSON (src/main/resources/createpolyphony.mixins.json).
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    def refmapFile = layout.buildDirectory.file("refmaps/${mod_id}.refmap.json").get().asFile.absolutePath
     options.compilerArgs += [
-        "-AoutRefMapFile=${buildDir}/refmaps/${mod_id}.refmap.json".toString(),
-        "-AdefaultObfuscationEnv=named:srg"
+        "-AoutRefMapFile=${refmapFile}".toString(),
+        // MCP obfuscation service exposes searge/notch in this toolchain.
+        "-AdefaultObfuscationEnv=searge"
     ]
 }
 
@@ -194,7 +196,7 @@ publishing {
     }
     repositories {
         maven {
-            url "file://${project.projectDir}/repo"
+            url = uri("${project.projectDir}/repo")
         }
     }
 }

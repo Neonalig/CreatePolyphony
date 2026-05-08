@@ -1,5 +1,6 @@
 package org.neonalig.createpolyphony.mixin;
 
+import com.finchy.pipeorgans.content.midi.trackerBar.TrackerBarBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
@@ -27,12 +28,10 @@ import javax.sound.midi.ShortMessage;
  * to whichever linked player is responsible for that channel. SoS continues
  * its own handling normally - the two systems run in parallel.</p>
  *
- * <p>Why string-targeted: this Mixin doesn't need any SoS classes on the
- * compile classpath. The {@code @Mixin(targets = ...)} string is resolved by
- * the Mixin transformer at load time. That keeps our hard dependency on SoS
- * limited to runtime, where it's enforced by {@code mods.toml}.</p>
+ * <p>The target is declared as a class literal because it is public and on our
+ * compile classpath, which keeps the annotation-processor diagnostics clean.</p>
  */
-@Mixin(targets = "com.finchy.pipeorgans.content.midi.trackerBar.TrackerBarBlockEntity", remap = false)
+@Mixin(value = TrackerBarBlockEntity.class, remap = false)
 public abstract class TrackerBarBlockEntityMixin {
 
     /**

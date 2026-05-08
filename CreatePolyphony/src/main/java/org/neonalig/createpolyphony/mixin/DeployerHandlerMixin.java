@@ -1,8 +1,9 @@
 package org.neonalig.createpolyphony.mixin;
 
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
+import com.simibubi.create.content.kinetics.deployer.DeployerHandler;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 import org.neonalig.createpolyphony.instrument.InstrumentItem;
@@ -20,7 +21,7 @@ import java.util.UUID;
  * Hooks Create deployer activations (stationary and contraption) so automation
  * holders can participate in tracker link assignment.
  */
-@Mixin(targets = "com.simibubi.create.content.kinetics.deployer.DeployerHandler", remap = false)
+@Mixin(value = DeployerHandler.class, remap = false)
 public abstract class DeployerHandlerMixin {
 
     @Inject(
@@ -33,7 +34,8 @@ public abstract class DeployerHandlerMixin {
                                                     Vec3 movementVector,
                                                     @Coerce Object mode,
                                                     CallbackInfo ci) {
-        if (!(fakePlayer.level() instanceof ServerLevel level)) return;
+        MinecraftServer server = fakePlayer.getServer();
+        if (server == null) return;
 
         // DeployerFakePlayer.getUUID() returns the *owner player's* UUID, which is shared
         // by every deployer they placed.  If two deployers are on the same contraption their
@@ -51,7 +53,7 @@ public abstract class DeployerHandlerMixin {
         );
 
         PolyphonyLinkManager.registerAutomationActivation(
-            level,
+            fakePlayer.serverLevel(),
             holderId,
             fakePlayer.getMainHandItem(),
             targetPos,
@@ -61,7 +63,7 @@ public abstract class DeployerHandlerMixin {
         if (!(fakePlayer.getMainHandItem().getItem() instanceof InstrumentItem)) {
             return;
         }
-        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(ownerId);
+        ServerPlayer owner = server.getPlayerList().getPlayer(ownerId);
         if (owner == null) return;
         PolyphonyAdvancementGrants.grantForHeldInstrument(owner, fakePlayer.getMainHandItem());
         PolyphonyAdvancementGrants.grantDeployerEncore(owner);
