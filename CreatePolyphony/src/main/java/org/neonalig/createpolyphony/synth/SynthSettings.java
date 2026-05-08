@@ -39,18 +39,6 @@ public record SynthSettings(
     int pumpChunkBytes
 ) {
 
-    public static SynthSettings defaults() {
-        return new SynthSettings(
-            44_100f,
-            1,
-            16,
-            32,
-            // 250 ms of mono 16-bit @ 44.1 kHz =~ 44100 * 1 * 2 * 0.25 = 22050 bytes
-            22_050,
-            // 4 KiB chunks =~ 11 ms at the above format
-            4_096
-        );
-    }
 
     public AudioFormat toAudioFormat() {
         // PCM_SIGNED, little-endian (matches OpenAL's preferred byte order on x86/x64).

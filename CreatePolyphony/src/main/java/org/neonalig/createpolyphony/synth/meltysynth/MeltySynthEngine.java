@@ -47,7 +47,6 @@ public final class MeltySynthEngine {
     private final MidiEventQueue midiQueue = new MidiEventQueue();
     private final int[] midiEventScratch = new int[4];
 
-    private volatile MeltySoundFont soundFont;
     private volatile Synthesizer synthesizer;
     private volatile boolean soundFontLoaded;
     private volatile boolean closed;
@@ -66,10 +65,6 @@ public final class MeltySynthEngine {
         this.settings = settings;
     }
 
-    public SynthSettings settings() {
-        return settings;
-    }
-
     public void loadSoundFont(MeltySoundFont soundFont) {
         SynthesizerSettings synthSettings = new SynthesizerSettings((int) settings.sampleRate());
         int configuredFrames = settings.pumpChunkBytes() / Math.max(1, settings.frameSize());
@@ -77,22 +72,15 @@ public final class MeltySynthEngine {
         synthSettings.blockSize(blockFrames);
         synthSettings.maximumPolyphony(Math.clamp(settings.maxVoices(), 8, 256));
         synthSettings.enableReverbAndChorus(true);
-        Synthesizer newSynth = new Synthesizer(soundFont.soundFont(), synthSettings);
-        this.soundFont = soundFont;
-        this.synthesizer = newSynth;
+        this.synthesizer = new Synthesizer(soundFont.soundFont(), synthSettings);
         this.soundFontLoaded = true;
         allNotesOff();
     }
 
     public void unloadSoundFont() {
-        this.soundFont = null;
         this.synthesizer = null;
         this.soundFontLoaded = false;
         allNotesOff();
-    }
-
-    public MeltySoundFont soundFont() {
-        return soundFont;
     }
 
     // ---- MIDI entry points (untimed = legacy "apply immediately") --------------------------
@@ -154,14 +142,10 @@ public final class MeltySynthEngine {
         midiQueue.offer(EVT_CC, channel & 0x0F, controller & 0x7F, value & 0x7F, nanos);
     }
 
-    public boolean isClosed() {
-        return closed;
-    }
 
     public void close() {
         closed = true;
         synthesizer = null;
-        soundFont = null;
         soundFontLoaded = false;
         midiQueue.clear();
     }

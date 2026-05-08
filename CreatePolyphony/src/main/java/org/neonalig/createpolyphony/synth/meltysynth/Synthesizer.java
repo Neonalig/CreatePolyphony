@@ -9,7 +9,6 @@ public final class Synthesizer implements IAudioRenderer {
     private final SoundFont soundFont;
     private final int sampleRate;
     private final int blockSize;
-    private final int maximumPolyphony;
     private final boolean enableReverbAndChorus;
     private final int minimumVoiceDuration;
     private final Channel[] channels;
@@ -18,7 +17,7 @@ public final class Synthesizer implements IAudioRenderer {
     private final float[] blockRight;
     private final float inverseBlockSize;
     private int blockRead;
-    private float masterVolume;
+    private final float masterVolume;
     private Reverb reverb;
     private float[] reverbInput;
     private float[] reverbOutputLeft;
@@ -29,10 +28,6 @@ public final class Synthesizer implements IAudioRenderer {
     private float[] chorusOutputLeft;
     private float[] chorusOutputRight;
 
-    public Synthesizer(SoundFont soundFont, int sampleRate) {
-        this(soundFont, new SynthesizerSettings(sampleRate));
-    }
-
     public Synthesizer(SoundFont soundFont, SynthesizerSettings settings) {
         if (soundFont == null || settings == null) {
             throw new IllegalArgumentException("soundFont and settings must not be null");
@@ -40,7 +35,7 @@ public final class Synthesizer implements IAudioRenderer {
         this.soundFont = soundFont;
         this.sampleRate = settings.sampleRate();
         this.blockSize = settings.blockSize();
-        this.maximumPolyphony = settings.maximumPolyphony();
+        int maximumPolyphony = settings.maximumPolyphony();
         this.enableReverbAndChorus = settings.enableReverbAndChorus();
         this.minimumVoiceDuration = sampleRate / 500;
         this.channels = new Channel[CHANNEL_COUNT];
@@ -90,8 +85,8 @@ public final class Synthesizer implements IAudioRenderer {
                     case 0x40 -> channelInfo.setHoldPedal(data2);
                     case 0x5B -> channelInfo.setReverbSend(data2);
                     case 0x5D -> channelInfo.setChorusSend(data2);
-                    case 0x63 -> channelInfo.setNrpnCoarse(data2);
-                    case 0x62 -> channelInfo.setNrpnFine(data2);
+                    case 0x63 -> channelInfo.setNrpnCoarse();
+                    case 0x62 -> channelInfo.setNrpnFine();
                     case 0x65 -> channelInfo.setRpnCoarse(data2);
                     case 0x64 -> channelInfo.setRpnFine(data2);
                     case 0x78 -> noteOffAll(channel, true);
@@ -161,12 +156,6 @@ public final class Synthesizer implements IAudioRenderer {
                     voice.end();
                 }
             }
-        }
-    }
-
-    public void resetAllControllers() {
-        for (Channel channel : channels) {
-            channel.resetAllControllers();
         }
     }
 
@@ -260,14 +249,9 @@ public final class Synthesizer implements IAudioRenderer {
     }
 
     public int blockSize() { return blockSize; }
-    public int maximumPolyphony() { return maximumPolyphony; }
-    public int channelCount() { return CHANNEL_COUNT; }
-    public int percussionChannel() { return PERCUSSION_CHANNEL; }
     public SoundFont soundFont() { return soundFont; }
     public int sampleRate() { return sampleRate; }
     public int activeVoiceCount() { return voices.activeVoiceCount(); }
-    public float masterVolume() { return masterVolume; }
-    public void masterVolume(float value) { masterVolume = value; }
     int minimumVoiceDuration() { return minimumVoiceDuration; }
     Channel[] channels() { return channels; }
 }
