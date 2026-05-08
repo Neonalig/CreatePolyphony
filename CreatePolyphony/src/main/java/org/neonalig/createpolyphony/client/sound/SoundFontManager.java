@@ -245,8 +245,8 @@ public final class SoundFontManager {
         return loadProgressPercent.get() / 100f;
     }
 
-    public boolean synthesisAvailable() {
-        return synth != null;
+    public boolean synthesisUnavailable() {
+        return synth == null;
     }
 
     /** Monotonic generation bumping whenever active selection/load lifecycle changes. */

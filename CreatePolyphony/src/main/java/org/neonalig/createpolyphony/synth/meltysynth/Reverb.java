@@ -21,9 +21,7 @@ final class Reverb {
 
     private float gain;
     private float roomSize;
-    private float roomSize1;
     private float damp;
-    private float damp1;
     private float wet;
     private float wet1;
     private float wet2;
@@ -101,16 +99,16 @@ final class Reverb {
     private void update() {
         wet1 = wet * (width / 2F + 0.5F);
         wet2 = wet * ((1F - width) / 2F);
-        roomSize1 = roomSize;
-        damp1 = damp;
+        float roomSizeValue = roomSize;
+        float dampValue = damp;
         gain = FIXED_GAIN;
         for (CombFilter cf : cfsL) {
-            cf.feedback(roomSize1);
-            cf.damp(damp1);
+            cf.feedback(roomSizeValue);
+            cf.damp(dampValue);
         }
         for (CombFilter cf : cfsR) {
-            cf.feedback(roomSize1);
-            cf.damp(damp1);
+            cf.feedback(roomSizeValue);
+            cf.damp(dampValue);
         }
     }
 

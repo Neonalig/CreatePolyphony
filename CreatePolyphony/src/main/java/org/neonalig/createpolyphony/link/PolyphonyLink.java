@@ -204,7 +204,8 @@ public final class PolyphonyLink {
      * {@link #channelPrograms}. O(16 * P) where P = participant count, so
      * effectively constant.
      *
-     * <p>For each channel, every {@linkplain #isEligibleForChannel eligible}
+     * <p>For each channel, every participant that is not
+     * {@linkplain #isIneligibleForChannel ineligible}
      * participant is assigned. The note dispatcher then sends one packet per
      * assignee, each tagged with the participant's distinct {@code sourceBusId}
      * so the client renders them on independent synths - which is what makes
@@ -220,7 +221,7 @@ public final class PolyphonyLink {
         for (int ch = 0; ch < 16; ch++) {
             List<ChannelAssignee> list = null;
             for (Participant p : participants) {
-                if (!isEligibleForChannel(p, ch)) continue;
+                if (isIneligibleForChannel(p, ch)) continue;
                 if (list == null) list = new ArrayList<>(participants.size());
                 list.add(p.assignee());
             }
@@ -228,17 +229,17 @@ public final class PolyphonyLink {
         }
     }
 
-    private static boolean isEligibleForChannel(Participant p, int channel) {
+    private static boolean isIneligibleForChannel(Participant p, int channel) {
         if (!p.family.isWildcard()) {
             if (p.family == InstrumentFamily.DRUM_KIT) {
-                if (channel != 9) return false;
+                if (channel != 9) return true;
             } else if (channel == 9) {
-                return false;
+                return true;
             }
         }
 
-        if (p.filteredMask == 0) return true;
-        return (p.filteredMask & (1 << channel)) != 0;
+        if (p.filteredMask == 0) return false;
+        return (p.filteredMask & (1 << channel)) == 0;
     }
 
     private List<Participant> orderedParticipants() {

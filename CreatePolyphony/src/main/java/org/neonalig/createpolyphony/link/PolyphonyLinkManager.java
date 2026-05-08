@@ -557,8 +557,7 @@ public final class PolyphonyLinkManager {
                                           long eventNanos) {
         boolean isNoteOn = (command & 0xF0) == 0x90 && velocity > 0;
         int maxDistanceBlocksInt = simulationDistanceBlocks(trackerLevel.getServer());
-        double maxDist = maxDistanceBlocksInt;
-        double maxDistSq = maxDist * maxDist;
+        double maxDistSq = (double) maxDistanceBlocksInt * maxDistanceBlocksInt;
 
         // ---- Direct player recipient ----
         ServerPlayer directPlayer = trackerLevel.getServer().getPlayerList().getPlayer(realHolderId);

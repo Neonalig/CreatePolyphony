@@ -223,12 +223,11 @@ public final class MeltySynthEngine {
                 } else {
                     long deltaNanos = headNanos - blockStartNanos;
                     long offsetFrames = (long) ((double) deltaNanos / nanosPerFrame);
-                    int boundedOffset = offsetFrames < 0
+                    splitOffset = offsetFrames < 0
                         ? 0
                         : (offsetFrames > sliceFrames - producedInSlice
                             ? sliceFrames - producedInSlice
                             : (int) offsetFrames);
-                    splitOffset = boundedOffset;
                 }
 
                 // Render the audio strictly preceding the event, if any.

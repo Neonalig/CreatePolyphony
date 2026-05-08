@@ -104,10 +104,7 @@ public enum InstrumentFamily {
             case 0 -> PIANO;            // 0-7   Piano
             case 1 -> PIANO;            // 8-15  Chromatic Percussion
             case 2 -> ACCORDION;        // 16-23 Organ
-            case 3 -> {
-                // 24-31 Guitar - split: 24-26 acoustic, 27-31 electric
-                yield gmProgram <= 26 ? ACOUSTIC_GUITAR : ELECTRIC_GUITAR;
-            }
+            case 3 -> gmProgram <= 26 ? ACOUSTIC_GUITAR : ELECTRIC_GUITAR; // 24-31 Guitar split
             case 4 -> BASS_GUITAR;      // 32-39 Bass
             case 5, 6 -> VIOLIN;        // 40-55 Strings + Ensemble
             case 7 -> TRUMPET;          // 56-63 Brass

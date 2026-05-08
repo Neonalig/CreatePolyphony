@@ -64,7 +64,7 @@ public final class PolyphonyClientTestCommands {
         }
         Minecraft mc = Minecraft.getInstance();
         mc.execute(() -> mc.setScreen(new SoundFontPickerScreen(manager)));
-        if (!manager.synthesisAvailable()) {
+        if (manager.synthesisUnavailable()) {
             tell("Opened SoundFont settings screen (synth backend unavailable; playback currently muted).");
         } else {
             tell("Opened SoundFont settings screen.");
@@ -120,7 +120,7 @@ public final class PolyphonyClientTestCommands {
             tell("Failed to re-create SoundFont manager after reload.");
             return 0;
         }
-        if (!reloaded.synthesisAvailable()) {
+        if (reloaded.synthesisUnavailable()) {
             tell("Manager reloaded, but synth backend is still unavailable.");
         } else {
             tell("Synth reloaded from current config values.");

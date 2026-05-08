@@ -36,13 +36,15 @@ final class Lfo {
             value = 0F;
         } else {
             double phase = ((currentTime - delay) % period) / period;
+            double shape;
             if (phase < 0.25) {
-                value = (float) (4 * phase);
+                shape = phase;
             } else if (phase < 0.75) {
-                value = (float) (4 * (0.5 - phase));
+                shape = 0.5 - phase;
             } else {
-                value = (float) (4 * (phase - 1.0));
+                shape = phase - 1.0;
             }
+            value = (float) (4 * shape);
         }
     }
 
