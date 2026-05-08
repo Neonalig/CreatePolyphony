@@ -51,17 +51,19 @@ public final class PolyphonySynthesizer {
     public void loadSoundFont(File sf2File) throws IOException {
         MeltySoundFont bank = MeltySoundFont.load(sf2File);
         engine.loadSoundFont(bank);
-        CreatePolyphony.LOGGER.info(
-            "Loaded soundfont {} ({} presets, {} instruments, {} samples)",
-            sf2File.getName(), bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
+        logSoundFontLoaded(sf2File, bank, "direct");
     }
 
     public void loadSoundFont(File sf2File, IntConsumer progressCallback) throws IOException {
         MeltySoundFont bank = MeltySoundFont.load(sf2File, progressCallback);
         engine.loadSoundFont(bank);
+        logSoundFontLoaded(sf2File, bank, "progress-tracked");
+    }
+
+    private static void logSoundFontLoaded(File sf2File, MeltySoundFont bank, String loadMode) {
         CreatePolyphony.LOGGER.info(
-            "Loaded soundfont {} ({} presets, {} instruments, {} samples)",
-            sf2File.getName(), bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
+            "Loaded soundfont {} via {} load ({} presets, {} instruments, {} samples)",
+            sf2File.getName(), loadMode, bank.presetCount(), bank.instrumentCount(), bank.sampleCount());
     }
 
     /**
