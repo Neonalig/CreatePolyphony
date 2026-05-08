@@ -1,6 +1,5 @@
 package org.neonalig.createpolyphony.instrument;
 
-import net.minecraft.resources.ResourceLocation;
 import org.neonalig.createpolyphony.CreatePolyphony;
 
 import java.util.Locale;
@@ -77,11 +76,6 @@ public enum InstrumentFamily {
         return this == ONE_MAN_BAND;
     }
 
-    /** Resource location for this family's main item, e.g. {@code createpolyphony:piano}. */
-    public ResourceLocation itemId() {
-        return ResourceLocation.fromNamespaceAndPath(CreatePolyphony.MODID, id);
-    }
-
     /** Translation key for this family's display name. */
     public String translationKey() {
         return "instrument." + CreatePolyphony.MODID + "." + id;
@@ -153,13 +147,6 @@ public enum InstrumentFamily {
         };
     }
 
-    /** Convenience: case-insensitive lookup by {@link #getId()}. */
-    public static InstrumentFamily byId(String id) {
-        for (var f : values()) {
-            if (f.id.equalsIgnoreCase(id)) return f;
-        }
-        throw new IllegalArgumentException("Unknown instrument family: " + id);
-    }
 
     @Override
     public String toString() {

@@ -145,6 +145,7 @@ public final class PolyphonyClientNoteHandler {
 
     /** Network entrypoint - safe to call on the network thread. */
     public static void handle(PlayInstrumentNotePayload payload, IPayloadContext context) {
+        java.util.Objects.requireNonNull(context, "context");
         // We deliberately do NOT use enqueueWork() here. The scheduler runs on
         // its own daemon thread and synth event entry points are documented as
         // thread-safe; routing on the network thread shaves the client-tick
@@ -643,30 +644,6 @@ public final class PolyphonyClientNoteHandler {
         }
     }
 
-    // ---- Synth lookup ------------------------------------------------------------------------
-
-    /**
-     * The current active synthesizer, or {@code null} if no soundfont is
-     * loaded. The {@link org.neonalig.createpolyphony.client.sound SoundFontManager}
-     * (registered in a later setup hook) replaces this hook to point at
-     * its own state. Keeping the lookup behind a function pointer means
-     * this handler doesn't import the manager and can be tested in
-     * isolation.
-     */
-    private static volatile java.util.function.Supplier<PolyphonySynthesizer> synthSupplier = () -> null;
-
-    public static void setSynthSupplier(java.util.function.Supplier<PolyphonySynthesizer> supplier) {
-        synthSupplier = supplier == null ? () -> null : supplier;
-    }
-
-    private static PolyphonySynthesizer currentSynth() {
-        try {
-            return synthSupplier.get();
-        } catch (Throwable t) {
-            CreatePolyphony.LOGGER.error("synthSupplier threw", t);
-            return null;
-        }
-    }
 
     private static void debugNote(String phase, PlayInstrumentNotePayload payload) {
         if (!CreatePolyphony.LOGGER.isDebugEnabled()) return;

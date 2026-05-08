@@ -7,7 +7,6 @@ final class ZoneInfo {
     private final int generatorIndex;
     private final int modulatorIndex;
     private int generatorCount;
-    private int modulatorCount;
 
     private ZoneInfo(DataInput in) throws IOException {
         generatorIndex = BinaryReaderEx.readInt16LE(in);
@@ -25,14 +24,11 @@ final class ZoneInfo {
         }
         for (int i = 0; i < count - 1; i++) {
             zones[i].generatorCount = zones[i + 1].generatorIndex - zones[i].generatorIndex;
-            zones[i].modulatorCount = zones[i + 1].modulatorIndex - zones[i].modulatorIndex;
         }
         return zones;
     }
 
     int generatorIndex() { return generatorIndex; }
-    int modulatorIndex() { return modulatorIndex; }
     int generatorCount() { return generatorCount; }
-    int modulatorCount() { return modulatorCount; }
 }
 

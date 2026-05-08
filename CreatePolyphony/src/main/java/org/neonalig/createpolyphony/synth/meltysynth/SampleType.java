@@ -16,9 +16,6 @@ public enum SampleType {
         this.value = value;
     }
 
-    public int value() {
-        return value;
-    }
 
     public static SampleType fromValue(int value) {
         for (SampleType type : values()) {

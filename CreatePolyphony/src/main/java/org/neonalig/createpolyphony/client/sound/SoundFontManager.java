@@ -82,8 +82,6 @@ import java.util.stream.Stream;
  *       snapshot copy.</li>
  *   <li>{@link #setActive(String)} should be called from the client main
  *       thread (it triggers OpenAL state changes).</li>
- *   <li>{@link #activeSynth()} is the network handler's hot path - lock
- *       free and uses a volatile field for visibility.</li>
  * </ul>
  */
 @OnlyIn(Dist.CLIENT)
@@ -169,8 +167,6 @@ public final class SoundFontManager {
             }
             SoundFontManager mgr = new SoundFontManager(dir, synth);
 
-            // Wire the note handler to query us for the synth.
-            PolyphonyClientNoteHandler.setSynthSupplier(mgr::activeSynth);
             // Whenever the active soundfont (re)loads, kick the note handler's
             // background prewarmer so a small pool of ready-to-go synths is
             // standing by before the next first-NoteOn arrives. Without this,
@@ -222,11 +218,6 @@ public final class SoundFontManager {
         return activeName;
     }
 
-    /** The synth currently bound to the active soundfont, or {@code null} for "None". */
-    @Nullable
-    public PolyphonySynthesizer activeSynth() {
-        return (activeName == null || loading) ? null : synth;
-    }
 
     public boolean isLoading() {
         return loading;

@@ -44,7 +44,6 @@ public record RegionPair(PresetRegion preset, InstrumentRegion instrument) {
     public float initialFilterQ() { return 0.1F * g(GeneratorType.INITIAL_FILTER_Q.value()); }
     public int modulationLfoToFilterCutoffFrequency() { return g(GeneratorType.MODULATION_LFO_TO_FILTER_CUTOFF_FREQUENCY.value()); }
     public int modulationEnvelopeToFilterCutoffFrequency() { return g(GeneratorType.MODULATION_ENVELOPE_TO_FILTER_CUTOFF_FREQUENCY.value()); }
-    public float modulationLfoToVolume() { return 0.1F * g(GeneratorType.MODULATION_LFO_TO_VOLUME.value()); }
     public float chorusEffectsSend() { return 0.1F * g(GeneratorType.CHORUS_EFFECTS_SEND.value()); }
     public float reverbEffectsSend() { return 0.1F * g(GeneratorType.REVERB_EFFECTS_SEND.value()); }
     public float delayModulationLfo() { return SoundFontMath.timecentsToSeconds(g(GeneratorType.DELAY_MODULATION_LFO.value())); }
@@ -72,10 +71,6 @@ public record RegionPair(PresetRegion preset, InstrumentRegion instrument) {
     public int modEnvToPitchCents() { return g(GeneratorType.MODULATION_ENVELOPE_TO_PITCH.value()); }
     public float modLfoToVolumeDb() { return 0.1F * g(GeneratorType.MODULATION_LFO_TO_VOLUME.value()); }
     public int sampleRate() { return instrument.sample().sampleRate(); }
-    public int keyRangeStart() { return g(GeneratorType.KEY_RANGE.value()) & 0xFF; }
-    public int keyRangeEnd() { return (g(GeneratorType.KEY_RANGE.value()) >> 8) & 0xFF; }
-    public int velocityRangeStart() { return g(GeneratorType.VELOCITY_RANGE.value()) & 0xFF; }
-    public int velocityRangeEnd() { return (g(GeneratorType.VELOCITY_RANGE.value()) >> 8) & 0xFF; }
     public int exclusiveClass() { return instrument.exclusiveClass(); }
 }
 

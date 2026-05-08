@@ -310,23 +310,6 @@ public final class PolyphonyLinkManager {
 
     // ---- dispatch path (called from the TrackerBar mixin) -------------------------------------
 
-    /**
-     * Dispatch a single MIDI short-message that just passed through the tracker
-     * at {@code pos} to whichever linked player is responsible for its channel.
-     *
-     * <p>This is the hot path - it must be cheap. We do exactly one HashMap
-     * lookup, one channel-program update (if applicable), and one packet send
-     * for note on/off events.</p>
-     *
-     * @param level     the server level the tracker is in.
-     * @param pos       the tracker block position.
-     * @param status    the MIDI status byte (already including channel, e.g. 0x90 = note-on ch 0).
-     * @param data1     MIDI data byte 1 (note number for NoteOn/Off, program for ProgramChange).
-     * @param data2     MIDI data byte 2 (velocity for NoteOn/Off; ignored for ProgramChange).
-     */
-    public static void dispatchNote(ServerLevel level, BlockPos pos, int status, int data1, int data2) {
-        dispatchNote(level, pos, status, data1, data2, System.nanoTime());
-    }
 
     /**
      * Variant that accepts the {@link System#nanoTime()} stamp captured at the
