@@ -21,7 +21,6 @@ final class Voice {
     private int exclusiveClass;
     private int channel;
     private int key;
-    private int velocity;
     private float noteGain;
     private float cutoff;
     private float resonance;
@@ -55,7 +54,6 @@ final class Voice {
         this.exclusiveClass = region.exclusiveClass();
         this.channel = channel;
         this.key = key;
-        this.velocity = velocity;
 
         if (velocity > 0) {
             float sampleAttenuation = 0.4F * region.initialAttenuationDb();
@@ -80,10 +78,10 @@ final class Voice {
         instrumentReverb = 0.01F * region.reverbEffectsSend();
         instrumentChorus = 0.01F * region.chorusEffectsSend();
 
-        RegionEx.start(volEnv, region, key, velocity);
+        RegionEx.start(volEnv, region, key);
         RegionEx.start(modEnv, region, key, velocity);
-        RegionEx.startVibrato(vibLfo, region, key, velocity);
-        RegionEx.startModulation(modLfo, region, key, velocity);
+        RegionEx.startVibrato(vibLfo, region);
+        RegionEx.startModulation(modLfo, region);
         RegionEx.start(oscillator, synthesizer.soundFont().waveDataArray(), region);
         filter.clearBuffer();
         filter.setLowPassFilter(cutoff, resonance);
@@ -202,7 +200,6 @@ final class Voice {
     int exclusiveClass() { return exclusiveClass; }
     int channel() { return channel; }
     int key() { return key; }
-    int velocity() { return velocity; }
     int voiceLength() { return voiceLength; }
 
     private enum VoiceState {

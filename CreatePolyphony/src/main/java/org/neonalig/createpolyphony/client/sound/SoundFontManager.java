@@ -165,31 +165,31 @@ public final class SoundFontManager {
                     "Sound synthesis backend unavailable; UI and soundfont selection will stay available but note playback is disabled.",
                     synthError);
             }
-            SoundFontManager mgr = new SoundFontManager(dir, synth);
-
-            // Whenever the active soundfont (re)loads, kick the note handler's
-            // background prewarmer so a small pool of ready-to-go synths is
-            // standing by before the next first-NoteOn arrives. Without this,
-            // equipping a linked instrument mid-song forces a synchronous SF2
-            // parse on the client thread the first time we have to build a
-            // SourceBus for that holder, which manifests as a several-hundred
-            // -ms hitch right when playback starts.
-            mgr.addListener(m -> {
-                if (!m.isLoading() && m.active() != null) {
-                    PolyphonyClientNoteHandler.requestPrewarm();
-                }
-            });
-
-            // Restore last selection, if any.
-            mgr.loadSelectionFromDisk();
-
-            INSTANCE = mgr;
+            INSTANCE = createAndInitialise(dir, synth);
             CreatePolyphony.LOGGER.info("SoundFontManager initialised at {}", dir);
-            return mgr;
+            return INSTANCE;
         } catch (Throwable t) {
             CreatePolyphony.LOGGER.error("Failed to initialise SoundFontManager", t);
             return null;
         }
+    }
+
+    /** Creates, wires listeners, and restores persisted selection. Extracted to keep {@link #get()} readable. */
+    private static SoundFontManager createAndInitialise(Path dir, @Nullable PolyphonySynthesizer synth) throws IOException {
+        SoundFontManager mgr = new SoundFontManager(dir, synth);
+
+        // Whenever the active soundfont (re)loads, kick the note handler's
+        // background prewarmer so a small pool of ready-to-go synths is
+        // standing by before the next first-NoteOn arrives.
+        mgr.addListener(m -> {
+            if (!m.isLoading() && m.active() != null) {
+                PolyphonyClientNoteHandler.requestPrewarm();
+            }
+        });
+
+        // Restore last selection, if any.
+        mgr.loadSelectionFromDisk();
+        return mgr;
     }
 
     /**

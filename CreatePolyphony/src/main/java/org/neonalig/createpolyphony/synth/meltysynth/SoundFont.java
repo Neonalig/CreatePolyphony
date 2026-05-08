@@ -11,7 +11,6 @@ import java.util.function.IntConsumer;
 public final class SoundFont {
     private static final Logger LOG = Logger.getLogger(SoundFont.class.getName());
     private SoundFontInfo info;
-    private int bitsPerSample;
     private short[] waveData;
     private SampleHeader[] sampleHeaders;
     private Preset[] presets;
@@ -50,7 +49,6 @@ public final class SoundFont {
 
         info = new SoundFontInfo(reader);
         SoundFontSampleData sampleData = new SoundFontSampleData(reader, progressCallback);
-        bitsPerSample = sampleData.bitsPerSample();
         waveData = sampleData.samples();
         SoundFontParameters parameters = new SoundFontParameters(reader);
         sampleHeaders = parameters.sampleHeaders();
@@ -121,8 +119,6 @@ public final class SoundFont {
         return info.bankName();
     }
 
-    public SoundFontInfo info() { return info; }
-    public int bitsPerSample() { return bitsPerSample; }
     public short[] waveDataArray() { return waveData; }
     public SampleHeader[] sampleHeaderArray() { return sampleHeaders; }
     public Preset[] presetArray() { return presets; }

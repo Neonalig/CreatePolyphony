@@ -17,6 +17,7 @@ import org.neonalig.createpolyphony.registry.CPRecipeSerializers;
  */
 public final class UnlinkInstrumentRecipe extends CustomRecipe {
 
+    @SuppressWarnings("unused") // Called via UnlinkInstrumentRecipe::new method reference in CPRecipeSerializers.
     public UnlinkInstrumentRecipe(CraftingBookCategory category) {
         super(category);
     }

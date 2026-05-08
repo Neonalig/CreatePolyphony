@@ -36,7 +36,7 @@ public final class SampleHeader {
         originalPitch = in.readUnsignedByte();
         pitchCorrection = (byte) in.readUnsignedByte();
         BinaryReaderEx.readInt16LE(in); // link
-        SampleType.fromValue(BinaryReaderEx.readInt16LE(in)); // type
+        BinaryReaderEx.readInt16LE(in); // type – not used by the synth
     }
 
     static SampleHeader[] readFromChunk(DataInput in, int size) throws IOException {

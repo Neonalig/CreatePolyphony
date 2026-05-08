@@ -66,7 +66,6 @@ public final class PolyphonyLinkManager {
     public enum LinkAction {
         NOT_INSTRUMENT,
         LINKED,
-        SWAPPED,
         UNLINKED
     }
 

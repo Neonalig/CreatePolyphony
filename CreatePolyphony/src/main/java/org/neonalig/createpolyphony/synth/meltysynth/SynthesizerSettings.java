@@ -5,7 +5,7 @@ public final class SynthesizerSettings {
     static final int DEFAULT_MAXIMUM_POLYPHONY = 64;
     static final boolean DEFAULT_ENABLE_REVERB_AND_CHORUS = true;
 
-    private int sampleRate;
+    private final int sampleRate;
     private int blockSize;
     private int maximumPolyphony;
     private boolean enableReverbAndChorus;
@@ -37,7 +37,6 @@ public final class SynthesizerSettings {
     }
 
     public int sampleRate() { return sampleRate; }
-    public void sampleRate(int value) { checkSampleRate(value); sampleRate = value; }
     public int blockSize() { return blockSize; }
     public void blockSize(int value) { checkBlockSize(value); blockSize = value; }
     public int maximumPolyphony() { return maximumPolyphony; }

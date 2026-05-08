@@ -164,17 +164,6 @@ public final class Synthesizer implements IAudioRenderer {
         channels[channel].resetAllControllers();
     }
 
-    public void reset() {
-        voices.clear();
-        for (Channel channel : channels) {
-            channel.reset();
-        }
-        if (enableReverbAndChorus) {
-            reverb.mute();
-            chorus.mute();
-        }
-        blockRead = blockSize;
-    }
 
     @Override
     public void render(float[] left, float[] right, int offset, int length) {

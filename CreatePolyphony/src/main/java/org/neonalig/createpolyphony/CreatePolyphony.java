@@ -39,24 +39,14 @@ public final class CreatePolyphony {
         CPRecipeSerializers.register(modEventBus);
 
         // Common setup hook (logging only for now).
-        modEventBus.addListener(this::commonSetup);
+        modEventBus.addListener((FMLCommonSetupEvent ignored) ->
+            LOGGER.info("Create: Polyphony loading - {} instrument family items registered.",
+                CPItems.BY_FAMILY.size()));
 
         // Keep the legacy config registered so existing run/ data stays valid.
         modContainer.registerConfig(ModConfig.Type.COMMON, Config.SPEC);
 
-        // Expose a config UI factory so the NeoForge mods list enables the Config button.
-        try {
-            Class<?> bootstrap = Class.forName("org.neonalig.createpolyphony.client.PolyphonyClientBootstrap");
-            bootstrap.getMethod("registerConfigScreen", ModContainer.class).invoke(null, modContainer);
-        } catch (ClassNotFoundException ignored) {
-            // Dedicated server / datagen path: client bootstrap is absent or not loadable.
-        } catch (Throwable t) {
-            LOGGER.warn("Failed to register client config screen extension point", t);
-        }
-    }
-
-    private void commonSetup(FMLCommonSetupEvent event) {
-        LOGGER.info("Create: Polyphony loading - {} instrument family items registered.",
-            CPItems.BY_FAMILY.size());
+        // Client config UI and one-man-band name supplier are wired in
+        // PolyphonyClientBootstrap via @EventBusSubscriber(Dist.CLIENT).
     }
 }

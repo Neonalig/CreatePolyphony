@@ -5,12 +5,11 @@ import java.io.IOException;
 
 final class ZoneInfo {
     private final int generatorIndex;
-    private final int modulatorIndex;
     private int generatorCount;
 
     private ZoneInfo(DataInput in) throws IOException {
         generatorIndex = BinaryReaderEx.readInt16LE(in);
-        modulatorIndex = BinaryReaderEx.readInt16LE(in);
+        BinaryReaderEx.readInt16LE(in); // modulatorIndex – not used by the synth
     }
 
     static ZoneInfo[] readFromChunk(DataInput in, int size) throws IOException {
@@ -31,4 +30,3 @@ final class ZoneInfo {
     int generatorIndex() { return generatorIndex; }
     int generatorCount() { return generatorCount; }
 }
-

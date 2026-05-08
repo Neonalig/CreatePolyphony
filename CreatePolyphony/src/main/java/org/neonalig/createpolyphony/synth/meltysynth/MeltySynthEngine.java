@@ -85,30 +85,6 @@ public final class MeltySynthEngine {
 
     // ---- MIDI entry points (untimed = legacy "apply immediately") --------------------------
 
-    public void noteOn(int channel, int note, int velocity) {
-        if (closed) return;
-        midiQueue.offer(EVT_NOTE_ON, channel & 0x0F, note & 0x7F, velocity & 0x7F);
-    }
-
-    public void noteOff(int channel, int note) {
-        if (closed) return;
-        midiQueue.offer(EVT_NOTE_OFF, channel & 0x0F, note & 0x7F, 0);
-    }
-
-    public void programChange(int channel, int program) {
-        if (closed) return;
-        midiQueue.offer(EVT_PROGRAM, channel & 0x0F, program & 0x7F, 0);
-    }
-
-    public void pitchBend(int channel, int value) {
-        if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.clamp(value, 0, 16383), 0);
-    }
-
-    public void controlChange(int channel, int controller, int value) {
-        if (closed) return;
-        midiQueue.offer(EVT_CC, channel & 0x0F, controller & 0x7F, value & 0x7F);
-    }
 
     public void allNotesOff() {
         if (closed) return;
@@ -132,15 +108,6 @@ public final class MeltySynthEngine {
         midiQueue.offer(EVT_PROGRAM, channel & 0x0F, program & 0x7F, 0, nanos);
     }
 
-    public void pitchBendAt(int channel, int value, long nanos) {
-        if (closed) return;
-        midiQueue.offer(EVT_BEND, channel & 0x0F, Math.clamp(value, 0, 16383), 0, nanos);
-    }
-
-    public void controlChangeAt(int channel, int controller, int value, long nanos) {
-        if (closed) return;
-        midiQueue.offer(EVT_CC, channel & 0x0F, controller & 0x7F, value & 0x7F, nanos);
-    }
 
 
     public void close() {
