@@ -137,75 +137,13 @@
       }
     },
     "used_on_tracker": {
-      "trigger": "minecraft:item_used_on_block",
-      "conditions": {
-        "location": {
-          "block": {
-            "blocks": [
-              "pipeorgans:tracker_bar"
-            ]
-          }
-        },
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     },
     "used_on_deployer": {
-      "trigger": "minecraft:item_used_on_block",
-      "conditions": {
-        "location": {
-          "block": {
-            "blocks": [
-              "create:deployer"
-            ]
-          }
-        },
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     },
     "shared_with_entity": {
-      "trigger": "minecraft:thrown_item_picked_up_by_entity",
-      "conditions": {
-        "item": {
-          "items": [
-            "createpolyphony:piano",
-            "createpolyphony:acoustic_guitar",
-            "createpolyphony:electric_guitar",
-            "createpolyphony:bass_guitar",
-            "createpolyphony:violin",
-            "createpolyphony:trumpet",
-            "createpolyphony:flute",
-            "createpolyphony:accordion",
-            "createpolyphony:drum_kit",
-            "createpolyphony:one_man_band"
-          ]
-        }
-      }
+      "trigger": "minecraft:impossible"
     }
   },
   "requirements": [

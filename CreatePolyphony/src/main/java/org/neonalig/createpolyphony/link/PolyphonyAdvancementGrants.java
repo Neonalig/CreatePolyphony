@@ -36,6 +36,10 @@ public final class PolyphonyAdvancementGrants {
     private static final ResourceLocation DEPLOYER_ENCORE = id("polyphony/deployer_encore");
     private static final ResourceLocation ONE_MAN_BAND_FINALE = id("polyphony/one_man_band_finale");
 
+    private static final String FINALE_USED_ON_TRACKER = "used_on_tracker";
+    private static final String FINALE_USED_ON_DEPLOYER = "used_on_deployer";
+    private static final String FINALE_SHARED_WITH_ENTITY = "shared_with_entity";
+
     private static final Map<InstrumentFamily, ResourceLocation> INSTRUMENT_ADVANCEMENTS = new EnumMap<>(InstrumentFamily.class);
 
     static {
@@ -72,18 +76,21 @@ public final class PolyphonyAdvancementGrants {
     public static void grantLinkedUp(ServerPlayer player) {
         grantRoot(player);
         award(player, LINKED_UP);
+        awardFinaleCriterion(player, FINALE_USED_ON_TRACKER);
         tryGrantFinale(player);
     }
 
     public static void grantJamSession(ServerPlayer player) {
         grantRoot(player);
         award(player, JAM_SESSION);
+        awardFinaleCriterion(player, FINALE_SHARED_WITH_ENTITY);
         tryGrantFinale(player);
     }
 
     public static void grantDeployerEncore(ServerPlayer player) {
         grantRoot(player);
         award(player, DEPLOYER_ENCORE);
+        awardFinaleCriterion(player, FINALE_USED_ON_DEPLOYER);
         tryGrantFinale(player);
     }
 
@@ -114,6 +121,25 @@ public final class PolyphonyAdvancementGrants {
         }
     }
 
+    private static void awardFinaleCriterion(ServerPlayer player, String criterion) {
+        if (player.getServer() == null) return;
+
+        AdvancementHolder advancement = player.getServer().getAdvancements().get(ONE_MAN_BAND_FINALE);
+        if (advancement == null) return;
+
+        var progress = player.getAdvancements().getOrStartProgress(advancement);
+        if (progress.isDone()) return;
+        boolean hasCriterion = false;
+        for (String remaining : progress.getRemainingCriteria()) {
+            if (criterion.equals(remaining)) {
+                hasCriterion = true;
+                break;
+            }
+        }
+        if (!hasCriterion) return;
+        player.getAdvancements().award(advancement, criterion);
+    }
+
     private static boolean isDone(ServerPlayer player, ResourceLocation id) {
         if (player.getServer() == null) return false;
         AdvancementHolder advancement = player.getServer().getAdvancements().get(id);
@@ -122,6 +148,17 @@ public final class PolyphonyAdvancementGrants {
     }
 
     private static void tryGrantFinale(ServerPlayer player) {
+        // Keep finale milestone criteria synchronized with the dedicated interaction advancements.
+        if (isDone(player, LINKED_UP)) {
+            awardFinaleCriterion(player, FINALE_USED_ON_TRACKER);
+        }
+        if (isDone(player, DEPLOYER_ENCORE)) {
+            awardFinaleCriterion(player, FINALE_USED_ON_DEPLOYER);
+        }
+        if (isDone(player, JAM_SESSION)) {
+            awardFinaleCriterion(player, FINALE_SHARED_WITH_ENTITY);
+        }
+
         if (!isDone(player, PIANO)
             || !isDone(player, ACOUSTIC_GUITAR)
             || !isDone(player, ELECTRIC_GUITAR)

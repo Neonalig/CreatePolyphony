@@ -104,15 +104,6 @@ public final class PolyphonyInteractionHandler {
         }
     }
 
-    @SubscribeEvent
-    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
-        if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        ItemStack held = player.getItemInHand(event.getHand());
-        if (!(held.getItem() instanceof InstrumentItem)) return;
-
-        PolyphonyAdvancementGrants.grantForHeldInstrument(player, held);
-        PolyphonyAdvancementGrants.grantJamSession(player);
-    }
 
     @SubscribeEvent
     public static void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
