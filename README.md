@@ -1,6 +1,13 @@
 ﻿<div align="center">
   <img src="Resources/logo.png" alt="Create: Polyphony Logo" width="128" />
   <h1>Create: Polyphony</h1>
+  
+  <a href="https://modrinth.com/mod/createpolyphony">
+    <img src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/modrinth_vector.svg" alt="Available on Modrinth" height="50">
+  </a>
+  <a href="https://www.curseforge.com/minecraft/mc-mods/create-polyphony">
+    <img src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy/available/curseforge_vector.svg" alt="Available on CurseForge" height="50">
+  </a>
 </div>
 
 Create: Polyphony is a NeoForge addon for [Create](https://modrinth.com/mod/create) + [Create: Sound of Steam](https://github.com/CSOS-Team/SoundOfSteam). 
